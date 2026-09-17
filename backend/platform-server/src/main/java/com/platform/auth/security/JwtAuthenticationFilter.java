@@ -8,6 +8,7 @@ package com.platform.auth.security;
 import com.platform.auth.entity.User;
 import com.platform.auth.mapper.TokenBlacklistMapper;
 import com.platform.auth.mapper.UserMapper;
+import com.platform.auth.service.RoleService;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
@@ -23,7 +24,8 @@ import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.util.Collections;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * JWT 认证过滤器 - 从请求头解析 Token 并设置 SecurityContext
@@ -38,17 +40,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final String RESERVED_USERNAME = "superAdmin";
     /** 内置超级管理员角色编码（superAdmin 账号专属，高于 ADMIN） */
     private static final String BUILTIN_ROLE_CODE = "SUPER_ADMIN";
+    /** 内置管理员角色编码 */
+    private static final String BUILTIN_ADMIN_CODE = "ADMIN";
 
     private final JwtTokenProvider jwtTokenProvider;
     private final UserMapper userMapper;
     private final TokenBlacklistMapper tokenBlacklistMapper;
+    private final RoleService roleService;
 
     public JwtAuthenticationFilter(JwtTokenProvider jwtTokenProvider,
                                    UserMapper userMapper,
-                                   TokenBlacklistMapper tokenBlacklistMapper) {
+                                   TokenBlacklistMapper tokenBlacklistMapper,
+                                   RoleService roleService) {
         this.jwtTokenProvider = jwtTokenProvider;
         this.userMapper = userMapper;
         this.tokenBlacklistMapper = tokenBlacklistMapper;
+        this.roleService = roleService;
     }
 
     @Override
@@ -74,12 +81,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                             if (RESERVED_USERNAME.equalsIgnoreCase(user.getUsername())) {
                                 role = BUILTIN_ROLE_CODE;
                             }
+                            // 构建权限列表：角色权限 + 业务权限码（供 @PreAuthorize hasAuthority 检查）
+                            List<SimpleGrantedAuthority> authorities = buildAuthorities(role, user.getRoleId());
                             UsernamePasswordAuthenticationToken auth =
                                     new UsernamePasswordAuthenticationToken(
-                                            user,
-                                            null,
-                                            Collections.singletonList(
-                                                    new SimpleGrantedAuthority("ROLE_" + role))
+                                            user, null, authorities
                                     );
                             SecurityContextHolder.getContext().setAuthentication(auth);
                         }
@@ -92,6 +98,26 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
         }
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * 构建用户的权限列表（角色权限 + 业务权限码）
+     *
+     * <p>SUPER_ADMIN / ADMIN 内置角色展开为 permission 表全部启用权限编码；
+     * 其他角色从 role_permission 表加载已分配的权限编码（含内置角色判断）。</p>
+     */
+    private List<SimpleGrantedAuthority> buildAuthorities(String role, Long roleId) {
+        List<SimpleGrantedAuthority> authorities = new ArrayList<>();
+        // 角色权限（供 hasRole / hasAnyRole 检查）
+        authorities.add(new SimpleGrantedAuthority("ROLE_" + role));
+        // 业务权限码（供 hasAuthority 检查）
+        List<String> permCodes = (BUILTIN_ROLE_CODE.equals(role) || BUILTIN_ADMIN_CODE.equals(role))
+                ? roleService.getAllActivePermissionCodes()
+                : roleService.getAuthorityCodesByRoleId(roleId);
+        for (String code : permCodes) {
+            authorities.add(new SimpleGrantedAuthority(code));
+        }
+        return authorities;
     }
 
     /**

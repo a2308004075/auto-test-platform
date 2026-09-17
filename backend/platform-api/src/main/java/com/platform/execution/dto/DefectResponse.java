@@ -12,6 +12,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 缺陷响应
@@ -64,6 +65,11 @@ public class DefectResponse implements Serializable {
     private String updatedByName;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+
+    /**
+     * 自定义字段值（fieldKey -> 值；详情接口返回，由【字段管理】动态配置驱动）
+     */
+    private Map<String, String> customFields;
 
     /**
      * 子缺陷列表

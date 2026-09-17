@@ -9,6 +9,7 @@ import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration;
+import org.springframework.scheduling.annotation.EnableAsync;
 
 /**
  * 项目管理平台 - Spring Boot 启动类
@@ -19,6 +20,7 @@ import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServic
  */
 @SpringBootApplication(exclude = { UserDetailsServiceAutoConfiguration.class })
 @MapperScan("com.platform.**.mapper")
+@EnableAsync
 public class PostmanPlatformApplication {
 
     public static void main(String[] args) {

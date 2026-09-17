@@ -162,10 +162,6 @@ public class UserService {
             if (request.getRoleId() != null && !request.getRoleId().equals(user.getRoleId())) {
                 throw new BusinessException(ErrorCode.ADMIN_PROTECTED, "系统管理员账号不允许修改角色");
             }
-            // superAdmin 账号保护：不允许修改用户名
-            if (request.getDisplayName() != null && !request.getDisplayName().equals(user.getDisplayName())) {
-                throw new BusinessException(ErrorCode.ADMIN_PROTECTED, "系统管理员账号不允许修改用户名");
-            }
         }
 
         // 非 superAdmin 用户不可分配 SUPER_ADMIN 角色
@@ -173,7 +169,7 @@ public class UserService {
             validateSuperAdminRole(request.getRoleId());
         }
 
-        if (request.getDisplayName() != null) {
+        if (request.getDisplayName() != null && !request.getDisplayName().equals(user.getDisplayName())) {
             validateReservedDisplayName(request.getDisplayName());
             user.setDisplayName(request.getDisplayName());
         }

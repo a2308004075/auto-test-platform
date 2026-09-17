@@ -22,4 +22,9 @@ public final class BizType {
      * 手动化用例
      */
     public static final String MANUAL_CASE = "MANUAL_CASE";
+
+    /**
+     * 缺陷
+     */
+    public static final String DEFECT = "DEFECT";
 }

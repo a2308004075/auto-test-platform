@@ -12,22 +12,27 @@ import com.platform.common.exception.ErrorCode;
 import com.platform.common.service.ChangeLogService;
 import com.platform.common.service.CommentService;
 import com.platform.common.util.ChangeLogHelper;
+import com.platform.knowledge.event.ProjectMaterialChangedEvent;
+import com.platform.knowledge.service.KnowledgeMaterialCollector;
 import com.platform.project.service.ProjectService;
 import com.platform.requirement.dto.RequirementItemCreateRequest;
 import com.platform.requirement.dto.RequirementItemResponse;
 import com.platform.requirement.dto.RequirementVersionCreateRequest;
 import com.platform.requirement.dto.RequirementVersionResponse;
+import com.platform.requirement.entity.RequirementGroup;
 import com.platform.requirement.entity.RequirementItem;
 import com.platform.requirement.entity.RequirementVersion;
 import com.platform.requirement.mapper.RequirementItemMapper;
 import com.platform.requirement.mapper.RequirementVersionMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 需求文档管理服务
@@ -46,6 +51,8 @@ public class RequirementService {
     private final ChangeLogService changeLogService;
     private final CommentService commentService;
     private final RequirementCaseRelationService requirementCaseRelationService;
+    private final RequirementGroupService requirementGroupService;
+    private final ApplicationEventPublisher eventPublisher;
 
     // ===== 版本管理 =====
 
@@ -79,6 +86,7 @@ public class RequirementService {
 
         RequirementVersion version = new RequirementVersion();
         version.setProjectId(request.getProjectId());
+        version.setGroupId(resolveGroupId(request.getProjectId(), request.getGroupId()));
         version.setVersionName(request.getVersionName());
         version.setDescription(request.getDescription());
         version.setStatus(request.getStatus() != null ? request.getStatus() : "PLANNING");
@@ -86,6 +94,11 @@ public class RequirementService {
         version.setEndDate(request.getEndDate());
 
         versionMapper.insert(version);
+
+        // 知识库同步：需求版本变更（采集粒度 = 1 版本 = 1 知识库文档）
+        eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                version.getProjectId(), KnowledgeMaterialCollector.SOURCE_REQUIREMENT, version.getId()));
+
         RequirementVersionResponse resp = toVersionResponse(version);
         resp.setItemCount(0);
         return resp;
@@ -98,6 +111,8 @@ public class RequirementService {
     public RequirementVersionResponse updateVersion(Long versionId, RequirementVersionCreateRequest request) {
         RequirementVersion version = findVersionById(versionId);
 
+        // 分组：始终解析（null = 归入项目「未分组」系统分组）
+        version.setGroupId(resolveGroupId(version.getProjectId(), request.getGroupId()));
         version.setVersionName(request.getVersionName());
         version.setDescription(request.getDescription());
         if (request.getStatus() != null) {
@@ -107,6 +122,10 @@ public class RequirementService {
         version.setEndDate(request.getEndDate());
 
         versionMapper.updateById(version);
+
+        // 知识库同步：需求版本变更
+        eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                version.getProjectId(), KnowledgeMaterialCollector.SOURCE_REQUIREMENT, versionId));
 
         RequirementVersionResponse resp = toVersionResponse(version);
         LambdaQueryWrapper<RequirementItem> countWrapper = new LambdaQueryWrapper<>();
@@ -120,7 +139,7 @@ public class RequirementService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void deleteVersion(Long versionId) {
-        findVersionById(versionId);
+        RequirementVersion version = findVersionById(versionId);
 
         // 清理该版本下所有条目的评论、变更记录与用例关联
         LambdaQueryWrapper<RequirementItem> itemWrapper = new LambdaQueryWrapper<>();
@@ -133,6 +152,10 @@ public class RequirementService {
         }
 
         versionMapper.deleteById(versionId);
+
+        // 知识库同步：需求版本删除
+        eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                version.getProjectId(), KnowledgeMaterialCollector.SOURCE_REQUIREMENT, versionId));
     }
 
     // ===== 需求条目管理 =====
@@ -189,6 +212,10 @@ public class RequirementService {
         item.setSortOrder(last != null && last.getSortOrder() != null ? last.getSortOrder() + 1 : 0);
 
         itemMapper.insert(item);
+
+        // 知识库同步：条目变更归入所属版本重新采集
+        publishVersionEvent(item.getVersionId());
+
         return toItemResponse(item);
     }
 
@@ -235,6 +262,9 @@ public class RequirementService {
                 .compare("deadline", oldDeadline, item.getDeadline())
                 .save();
 
+        // 知识库同步：条目变更归入所属版本重新采集
+        publishVersionEvent(item.getVersionId());
+
         return toItemResponse(item);
     }
 
@@ -243,14 +273,28 @@ public class RequirementService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void deleteItem(Long itemId) {
-        findItemById(itemId);
+        RequirementItem item = findItemById(itemId);
         commentService.deleteByBiz(BizType.REQUIREMENT_ITEM, itemId);
         changeLogService.deleteByBiz(BizType.REQUIREMENT_ITEM, itemId);
         requirementCaseRelationService.deleteByItem(itemId);
         itemMapper.deleteById(itemId);
+
+        // 知识库同步：条目删除归入所属版本重新采集
+        publishVersionEvent(item.getVersionId());
     }
 
     // ===== 内部方法 =====
+
+    /**
+     * 发布需求版本变更事件（条目级操作聚合到所属版本，由采集器按版本整体重采）
+     */
+    private void publishVersionEvent(Long versionId) {
+        RequirementVersion version = versionMapper.selectById(versionId);
+        if (version != null) {
+            eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                    version.getProjectId(), KnowledgeMaterialCollector.SOURCE_REQUIREMENT, versionId));
+        }
+    }
 
     private RequirementVersion findVersionById(Long versionId) {
         RequirementVersion version = versionMapper.selectById(versionId);
@@ -258,6 +302,27 @@ public class RequirementService {
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "版本不存在");
         }
         return version;
+    }
+
+    /**
+     * 解析版本归属分组：为空时默认项目「未分组」系统分组；
+     * 非空时校验分组存在且属于当前项目（防止跨项目错挂）
+     */
+    private Long resolveGroupId(Long projectId, Long groupId) {
+        Map<Long, RequirementGroup> groupMap = requirementGroupService.getGroupMap(projectId);
+        if (groupId == null) {
+            for (RequirementGroup group : groupMap.values()) {
+                if (Integer.valueOf(1).equals(group.getIsSystem()) && "未分组".equals(group.getName())) {
+                    return group.getId();
+                }
+            }
+            throw new BusinessException(ErrorCode.REQUIREMENT_GROUP_NOT_FOUND, "项目「未分组」系统分组缺失：" + projectId);
+        }
+        RequirementGroup group = groupMap.get(groupId);
+        if (group == null) {
+            throw new BusinessException(ErrorCode.REQUIREMENT_GROUP_NOT_FOUND, "分组不存在：" + groupId);
+        }
+        return group.getId();
     }
 
     private RequirementItem findItemById(Long itemId) {
@@ -272,6 +337,7 @@ public class RequirementService {
         RequirementVersionResponse resp = new RequirementVersionResponse();
         resp.setId(v.getId());
         resp.setProjectId(v.getProjectId());
+        resp.setGroupId(v.getGroupId());
         resp.setVersionName(v.getVersionName());
         resp.setDescription(v.getDescription());
         resp.setStatus(v.getStatus());

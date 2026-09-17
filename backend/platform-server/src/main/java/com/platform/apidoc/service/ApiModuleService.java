@@ -13,11 +13,14 @@ import com.platform.apidoc.entity.Api;
 import com.platform.apidoc.mapper.ApiMapper;
 import com.platform.common.exception.BusinessException;
 import com.platform.common.exception.ErrorCode;
+import com.platform.knowledge.event.ProjectMaterialChangedEvent;
+import com.platform.knowledge.service.KnowledgeMaterialCollector;
 import com.platform.project.entity.ApiModule;
 import com.platform.project.mapper.ApiModuleMapper;
 import com.platform.project.service.ProjectService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -34,6 +37,7 @@ public class ApiModuleService {
     private final ApiModuleMapper apiModuleMapper;
     private final ApiMapper apiMapper;
     private final ProjectService projectService;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * 查询项目下的分组列表（扁平列表，前端自行建树）
@@ -129,6 +133,11 @@ public class ApiModuleService {
         module.setIsSystem(0);
 
         apiModuleMapper.insert(module);
+
+        // 知识库同步：模块创建（采集粒度 = 1 模块 = 1 知识库文档）
+        eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                module.getProjectId(), KnowledgeMaterialCollector.SOURCE_API_MODULE, module.getId()));
+
         return toResponse(module);
     }
 
@@ -166,6 +175,11 @@ public class ApiModuleService {
         module.setParentId(newParentId);
 
         apiModuleMapper.updateById(module);
+
+        // 知识库同步：模块元数据变化，重新采集该模块
+        eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                module.getProjectId(), KnowledgeMaterialCollector.SOURCE_API_MODULE, moduleId));
+
         return toResponse(module);
     }
 
@@ -194,6 +208,10 @@ public class ApiModuleService {
         }
 
         apiModuleMapper.deleteById(moduleId);
+
+        // 知识库同步：模块删除，同步引擎采集不到将移除对应知识库文档
+        eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                module.getProjectId(), KnowledgeMaterialCollector.SOURCE_API_MODULE, moduleId));
     }
 
     /**

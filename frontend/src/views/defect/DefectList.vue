@@ -26,7 +26,6 @@ const route = useRoute()
 const router = useRouter()
 const projectId = computed(() => Number(route.params.id))
 const { options: statusOptions } = useDict('defect_status')
-const { options: severityOptions } = useDict('defect_severity')
 
 // ===== 列表数据 =====
 const loading = ref(false)
@@ -35,7 +34,7 @@ const pagination = reactive({ current: 1, pageSize: 20, total: 0 })
 const selectedRows = ref<any[]>([])
 
 // ===== 搜索条件 =====
-const search = reactive({ keyword: '', status: '', severity: '', assigneeId: undefined as number | undefined })
+const search = reactive({ keyword: '', status: '' })
 
 // ===== 分组 =====
 const groups = ref<any[]>([])
@@ -98,8 +97,6 @@ async function fetchList() {
       groupId: groupIdParam,
       keyword: search.keyword || undefined,
       status: search.status || undefined,
-      severity: search.severity || undefined,
-      assigneeId: search.assigneeId,
       page: pagination.current, pageSize: pagination.pageSize,
     })
     list.value = res.data?.items || []
@@ -115,7 +112,7 @@ function selectGroup(id: number) {
 
 function handleSearch() { pagination.current = 1; fetchList() }
 function handleReset() {
-  Object.assign(search, { keyword: '', status: '', severity: '', assigneeId: undefined })
+  Object.assign(search, { keyword: '', status: '' })
   handleSearch()
 }
 
@@ -242,10 +239,6 @@ function openCreate() {
   router.push(`/project/${projectId.value}/defects/new`)
 }
 
-function handleEdit(record: any) {
-  router.push(`/project/${projectId.value}/defects/${record.id}/edit`)
-}
-
 function handleView(record: any) {
   router.push(`/project/${projectId.value}/defects/${record.id}`)
 }
@@ -256,6 +249,11 @@ async function handleTransition(record: any, targetStatus: string) {
     ElMessage.success('状态更新成功')
     fetchList()
   } catch { ElMessage.error('操作失败') }
+}
+
+/** 流转目标 = 除当前状态外的全部状态（宽松白名单） */
+function transitionTargets(current: string) {
+  return statusOptions.value.filter((o) => o.value !== current)
 }
 
 function handleDelete(record: any) {
@@ -302,13 +300,23 @@ function handleDeleteGroup(g: any) {
 }
 
 // ===== 常量映射 =====
-const severityTypeMap: Record<string, string> = { '致命': 'danger', '严重': 'warning', '一般': 'info', '提示': '' }
+// 标签色为前端展示样式；状态名称统一取自字典（sys_dict: defect_status）
 const statusTypeMap: Record<string, string> = {
-  NEW: 'info', PENDING: 'warning', COMPLETED: 'success', REOPENED: 'danger', CLOSED: ''
+  NEW: 'info',
+  TO_CONFIRM: 'warning',
+  FIXING: 'primary',
+  TO_DEPLOY: 'warning',
+  PENDING: 'warning',
+  COMPLETED: 'success',
+  REOPENED: 'danger',
+  DEFERRED: 'info',
+  CLOSED: 'info',
 }
-const statusLabelMap: Record<string, string> = {
-  NEW: '新建', PENDING: '待验证', COMPLETED: '已完成', REOPENED: '重新打开', CLOSED: '已关闭'
-}
+const statusLabelMap = computed(() => {
+  const map: Record<string, string> = {}
+  statusOptions.value.forEach((o) => { map[o.value] = o.label })
+  return map
+})
 
 // ===== 生命周期 =====
 const treeRef = ref()
@@ -375,12 +383,6 @@ onBeforeUnmount(() => {
               <el-option v-for="s in statusOptions" :key="s.value" :value="s.value" :label="s.label" />
             </el-select>
           </div>
-          <div class="pro-search-field">
-            <span class="pro-search-label">严重级别</span>
-            <el-select v-model="search.severity" placeholder="全部" clearable style="width: 100px">
-              <el-option v-for="s in severityOptions" :key="s.value" :value="s.value" :label="s.label" />
-            </el-select>
-          </div>
         </ProSearchCard>
 
         <BatchBar
@@ -406,26 +408,14 @@ onBeforeUnmount(() => {
               <el-tag :type="(statusTypeMap[row.status] || 'info') as any" size="small">{{ statusLabelMap[row.status] || row.status }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="严重级别" width="90">
-            <template #default="{ row }">
-              <el-tag :type="(severityTypeMap[row.severity] || 'info') as any" size="small">{{ row.severity }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="assigneeName" label="负责人" width="110" />
-          <el-table-column prop="moduleName" label="所属模块" width="120" show-overflow-tooltip />
-          <el-table-column prop="foundVersion" label="发现版本" width="100" />
-          <el-table-column label="操作" width="220" fixed="right">
+          <el-table-column label="操作" width="170" fixed="right">
             <template #default="{ row }">
               <el-button type="primary" link size="small" @click="handleView(row)">详情</el-button>
-              <el-button type="primary" link size="small" @click="handleEdit(row)">编辑</el-button>
               <el-dropdown size="small" @command="(cmd: string) => handleTransition(row, cmd)">
                 <el-button type="primary" link size="small">流转<el-icon class="el-icon--right"><arrow-down /></el-icon></el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item command="PENDING">待验证</el-dropdown-item>
-                    <el-dropdown-item command="COMPLETED">已完成</el-dropdown-item>
-                    <el-dropdown-item command="REOPENED">重新打开</el-dropdown-item>
-                    <el-dropdown-item command="CLOSED">已关闭</el-dropdown-item>
+                    <el-dropdown-item v-for="s in transitionTargets(row.status)" :key="s.value" :command="s.value">{{ s.label }}</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>

@@ -13,6 +13,7 @@ import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 缺陷创建请求
@@ -67,4 +68,9 @@ public class DefectCreateRequest implements Serializable {
      * 初始关联列表
      */
     private List<DefectRelationCreateRequest> relations;
+
+    /**
+     * 自定义字段值（fieldKey -> 值，由【字段管理】动态配置驱动）
+     */
+    private Map<String, String> customFields;
 }

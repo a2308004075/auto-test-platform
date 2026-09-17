@@ -41,6 +41,8 @@ const selectedRows = ref<any[]>([])
 // ===== 搜索条件 =====
 const search = reactive({ name: '', path: '', method: '', source: '' })
 
+const methodColors: Record<string, string> = { GET: '', POST: 'success', PUT: 'warning', DELETE: 'danger', PATCH: 'info' }
+
 // ===== 分组 =====
 const modules = ref<any[]>([])
 const activeModuleId = ref<number>(0) // 0 = 全部

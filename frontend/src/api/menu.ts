@@ -64,11 +64,6 @@ export function getMenu(id: number) {
   return request.get(`/v1/sys/menus/${id}`)
 }
 
-/** 新增菜单 */
-export function addMenu(data: MenuCreateRequest) {
-  return request.post('/v1/sys/menus', data)
-}
-
 /** 更新菜单 */
 export function updateMenu(id: number, data: MenuCreateRequest) {
   return request.post(`/v1/sys/menus/${id}`, data)
@@ -84,23 +79,14 @@ export function toggleMenuStatus(id: number) {
   return request.post(`/v1/sys/menus/${id}/toggle`)
 }
 
-/** 菜单 Excel 导入结果 */
-export interface MenuImportResult {
-  successCount: number
-  failCount: number
-  errors: string[]
+/** 菜单排序项（编辑模式拖拽保存） */
+export interface MenuSortItem {
+  id: number
+  parentId: number
+  sortNo: number
 }
 
-/** 导出菜单 Excel */
-export function exportMenus() {
-  return request.get('/v1/sys/menus/export', { responseType: 'blob' })
-}
-
-/** 导入菜单 Excel */
-export function importMenus(file: File) {
-  const formData = new FormData()
-  formData.append('file', file)
-  return request.post('/v1/sys/menus/import', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  })
+/** 批量更新菜单层级与顺序（编辑模式拖拽保存） */
+export function sortMenus(items: MenuSortItem[]) {
+  return request.post('/v1/sys/menus/sort', items)
 }

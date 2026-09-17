@@ -110,7 +110,7 @@ public class Defect extends BaseEntity {
     private LocalDate planTestDate;
 
     /**
-     * 状态：NEW/PENDING/COMPLETED/REOPENED/CLOSED
+     * 状态：NEW-新建/TO_CONFIRM-待确认/FIXING-修复中/TO_DEPLOY-待部署/PENDING-待验证/COMPLETED-已修复/REOPENED-重新打开/DEFERRED-延期修复/CLOSED-无需修复
      */
     private String status;
 

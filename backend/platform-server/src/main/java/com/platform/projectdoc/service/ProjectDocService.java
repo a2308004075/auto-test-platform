@@ -11,6 +11,8 @@ import com.platform.auth.entity.User;
 import com.platform.common.exception.BusinessException;
 import com.platform.common.exception.ErrorCode;
 import com.platform.common.response.PageResponse;
+import com.platform.knowledge.event.ProjectMaterialChangedEvent;
+import com.platform.knowledge.service.KnowledgeMaterialCollector;
 import com.platform.project.service.ProjectService;
 import com.platform.projectdoc.dto.ProjectDocResponse;
 import com.platform.projectdoc.dto.ProjectDocUpdateRequest;
@@ -22,6 +24,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -51,6 +54,7 @@ public class ProjectDocService {
     private final ProjectDocGroupMapper projectDocGroupMapper;
     private final ProjectDocGroupService projectDocGroupService;
     private final ProjectService projectService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Value("${doc.storage-path:./data/docs}")
     private String storagePath;
@@ -137,6 +141,11 @@ public class ProjectDocService {
             }
             throw e;
         }
+
+        // 知识库同步：新上传文档（采集粒度 = 1 文件 = 1 知识库文档）
+        eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                projectId, KnowledgeMaterialCollector.SOURCE_PROJECT_DOC, doc.getId()));
+
         return toResponse(doc);
     }
 
@@ -164,6 +173,11 @@ public class ProjectDocService {
         }
 
         projectDocMapper.updateById(doc);
+
+        // 知识库同步：元数据（文档名等）变化，采集器会重新比对指纹
+        eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                doc.getProjectId(), KnowledgeMaterialCollector.SOURCE_PROJECT_DOC, docId));
+
         return toResponse(doc);
     }
 
@@ -209,6 +223,11 @@ public class ProjectDocService {
 
         // DB 更新成功后删除旧文件（失败仅告警，不影响事务）
         deleteQuietly(new File(getProjectDir(doc.getProjectId()), oldStoredName));
+
+        // 知识库同步：文件本体更换，内容必变，触发重新采集
+        eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                doc.getProjectId(), KnowledgeMaterialCollector.SOURCE_PROJECT_DOC, docId));
+
         return toResponse(doc);
     }
 
@@ -263,6 +282,10 @@ public class ProjectDocService {
 
         // 磁盘文件删除失败仅告警，不影响事务
         deleteQuietly(new File(getProjectDir(doc.getProjectId()), doc.getStoredName()));
+
+        // 知识库同步：文档删除，同步引擎采集不到将移除对应知识库文档
+        eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                doc.getProjectId(), KnowledgeMaterialCollector.SOURCE_PROJECT_DOC, docId));
     }
 
     // ───────────────────── 私有方法 ─────────────────────

@@ -102,7 +102,15 @@ export function addSettingsRedirect(router: Router, layoutName: string): void {
  * 必须在 generateDynamicRoutes 之后、addCatchAllRoute 之前调用
  */
 export function addSupplementaryRoutes(router: Router, layoutName: string): void {
-  const routes = [
+  const routes: Array<{
+    path: string
+    component: string
+    title: string
+    /** 非项目内页面时置 false（默认 true） */
+    inProject?: boolean
+    /** 单菜单页面：侧边栏仅显示当前页自身一个菜单项（如我的任务） */
+    singleMenu?: boolean
+  }> = [
     // ===== 环境模块 =====
     { path: 'project/:id/environments/:envId/edit', component: 'environment/EnvironmentEdit', title: '编辑环境变量' },
 
@@ -133,9 +141,8 @@ export function addSupplementaryRoutes(router: Router, layoutName: string): void
     { path: 'project/:id/manual-cases/new',          component: 'manualcase/ManualCaseEdit', title: '新建手动化用例' },
     { path: 'project/:id/manual-cases/:caseId/edit', component: 'manualcase/ManualCaseEdit', title: '编辑手动化用例' },
 
-    // ===== 缺陷管理模块 =====
+    // ===== 缺陷管理模块（详情页内置查看/编辑模式，无独立编辑页） =====
     { path: 'project/:id/defects/new',              component: 'defect/DefectEdit',   title: '新建缺陷' },
-    { path: 'project/:id/defects/:defectId/edit',   component: 'defect/DefectEdit',   title: '编辑缺陷' },
     { path: 'project/:id/defects/:defectId',         component: 'defect/DefectDetail', title: '缺陷详情' },
 
     // ===== 测试计划/执行模块 =====
@@ -147,8 +154,11 @@ export function addSupplementaryRoutes(router: Router, layoutName: string): void
     { path: 'project/:id/requirements/new',                component: 'requirement/RequirementEdit', title: '新建需求' },
     { path: 'project/:id/requirements/:itemId/edit',       component: 'requirement/RequirementEdit', title: '编辑需求' },
 
-    // ===== 我的任务 =====
-    { path: 'settings/my-tasks', component: 'settings/MyTasksView', title: '我的任务' },
+    // ===== 知识库模块（菜单直达智能问答，知识库数据来源于项目资料同步） =====
+    { path: 'project/:id/knowledge',                    component: 'knowledge/KnowledgeChat', title: '知识库智能问答' },
+
+    // ===== 我的任务（单菜单页面：非项目内，侧边栏仅显示当前页一个菜单项） =====
+    { path: 'settings/my-tasks', component: 'settings/MyTasksView', title: '我的任务', inProject: false, singleMenu: true },
   ]
 
   for (const r of routes) {
@@ -158,7 +168,7 @@ export function addSupplementaryRoutes(router: Router, layoutName: string): void
         path: r.path,
         name: generateRouteName(r.path),
         component,
-        meta: { title: r.title, inProject: true },
+        meta: { title: r.title, inProject: r.inProject !== false, singleMenu: r.singleMenu === true },
       })
     }
   }

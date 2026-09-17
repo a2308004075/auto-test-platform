@@ -8,7 +8,6 @@ package com.platform.projectdoc.dto;
 import lombok.Data;
 
 import javax.validation.constraints.NotBlank;
-import javax.validation.constraints.NotNull;
 import javax.validation.constraints.Size;
 
 /**
@@ -17,7 +16,9 @@ import javax.validation.constraints.Size;
 @Data
 public class ProjectDocGroupCreateRequest {
 
-    @NotNull(message = "项目 ID 不能为空")
+    /**
+     * 项目 ID（由 Controller 从路径变量注入，请求体无需携带）
+     */
     private Long projectId;
 
     /**

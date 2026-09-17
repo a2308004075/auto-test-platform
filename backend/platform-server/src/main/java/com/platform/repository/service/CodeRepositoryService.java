@@ -10,6 +10,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.platform.common.exception.BusinessException;
 import com.platform.common.exception.ErrorCode;
 import com.platform.common.util.AesCryptoUtil;
+import com.platform.knowledge.event.ProjectMaterialChangedEvent;
+import com.platform.knowledge.service.KnowledgeMaterialCollector;
 import com.platform.project.service.ProjectService;
 import com.platform.repository.dto.PullLogResponse;
 import com.platform.repository.dto.PullResultResponse;
@@ -34,6 +36,7 @@ import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -62,6 +65,7 @@ public class CodeRepositoryService {
     private final CodeRepositoryPullLogMapper pullLogMapper;
     private final ProjectService projectService;
     private final CodeRepositoryGroupService repositoryGroupService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Value("${repository.storage-path}")
     private String storagePath;
@@ -275,6 +279,11 @@ public class CodeRepositoryService {
         }
 
         repositoryMapper.updateById(repo);
+
+        // 知识库同步：仓库元数据变化（未拉取仓库采集为空，同步引擎自动跳过）
+        eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                repo.getProjectId(), KnowledgeMaterialCollector.SOURCE_REPOSITORY, repoId));
+
         return toResponse(repo);
     }
 
@@ -316,6 +325,13 @@ public class CodeRepositoryService {
         }
 
         repositoryMapper.deleteById(repoId);
+
+        // 知识库同步：仓库删除，同步移除源代码与界面元素两类知识库文档
+        // （界面元素按仓库采集，仓库删除后采集为空，同步引擎将一并移除）
+        eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                repo.getProjectId(), KnowledgeMaterialCollector.SOURCE_REPOSITORY, repoId));
+        eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                repo.getProjectId(), KnowledgeMaterialCollector.SOURCE_UI_ELEMENT, repoId));
     }
 
     /**
@@ -384,6 +400,12 @@ public class CodeRepositoryService {
         long durationMs = System.currentTimeMillis() - startTime;
         finishPullLog(pullLog, success, commitId, message, durationMs);
         updateRepositoryAfterPull(repo, success, commitId);
+
+        // 知识库同步：代码拉取成功后重新采集仓库源码（采集粒度 = 1 仓库 = 1 知识库文档）
+        if (success) {
+            eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                    repo.getProjectId(), KnowledgeMaterialCollector.SOURCE_REPOSITORY, repo.getId()));
+        }
 
         PullResultResponse response = new PullResultResponse();
         response.setLogId(pullLog.getId());

@@ -22,13 +22,15 @@
     - [A.2 MySQL 8.0 启动](#a2-mysql-80-启动)
     - [A.3 Redis 7.x 启动](#a3-redis-7x-启动)
     - [A.4 RabbitMQ 启动](#a4-rabbitmq-启动)
-    - [A.5 XXL-Job 启动（可选，Phase 3 再用）](#a5-xxl-job-启动可选phase-3-再用)
-    - [A.6 一键启动所有中间件](#a6-一键启动所有中间件)
+    - [A.5 Qdrant 启动](#a5-qdrant-启动)
+    - [A.6 XXL-Job 启动（可选，Phase 3 再用）](#a6-xxl-job-启动可选phase-3-再用)
+    - [A.7 一键启动所有中间件](#a7-一键启动所有中间件)
   - [方式 B：原生 Windows 安装（无需管理员权限）](#方式-b原生-windows-安装无需管理员权限)
     - [B.1 MySQL 8.0 安装](#b1-mysql-80-安装)
     - [B.2 Redis 安装](#b2-redis-安装)
     - [B.3 RabbitMQ 安装](#b3-rabbitmq-安装)
-    - [B.4 各中间件访问信息汇总](#b4-各中间件访问信息汇总)
+    - [B.4 Qdrant 安装](#b4-qdrant-安装)
+    - [B.5 各中间件访问信息汇总](#b5-各中间件访问信息汇总)
 - [四、后端项目工程搭建](#四后端项目工程搭建)
   - [4.1 Maven 多模块项目结构](#41-maven-多模块项目结构)
   - [4.2 Maven POM 配置](#42-maven-pom-配置)
@@ -55,7 +57,7 @@
 |------|--------|------|
 | **前端** | Vue 3 + TypeScript + Vite + Element Plus 2.x | 独立的 SPA 工程，用 IDEA 打开 |
 | **后端** | Java 1.8 + Spring Boot 2.7（单体应用） | Maven 工程，用 IDEA 打开 |
-| **中间件** | MySQL 8.0 + Redis 7.x + RabbitMQ | Docker 容器 或 原生 Windows 安装（二选一） |
+| **中间件** | MySQL 8.0 + Redis 7.x + RabbitMQ + Qdrant | Docker 容器 或 原生 Windows 安装（二选一）；Qdrant 为知识库模块的向量数据库 |
 
 **你需要依次完成以下步骤：**
 
@@ -416,7 +418,32 @@ docker run -d `
 
 ---
 
-### A.5 XXL-Job 启动（可选，Phase 3 再用）
+### A.5 Qdrant 启动
+
+Qdrant 是知识库模块（RAG 检索增强问答）使用的向量数据库。后端通过 REST API 与 Qdrant 交互，无需额外 SDK。
+
+采用单容器模式（内嵌存储，适合开发环境）：
+
+```powershell
+docker run -d `
+  --name pp-qdrant `
+  -p 6333:6333 `
+  -p 6334:6334 `
+  -v pp-qdrant-data:/qdrant/storage `
+  qdrant/qdrant
+```
+
+**验证**：健康检查接口返回 `OK` 即启动成功：
+
+```powershell
+curl http://localhost:6333/readyz
+```
+
+> 端口说明：`6333` 是 REST API 端口（后端 HTTP 调用），`6334` 是 gRPC 端口。
+
+---
+
+### A.6 XXL-Job 启动（可选，Phase 3 再用）
 
 XXL-Job 用于分布式定时调度（测试计划定时执行），在项目 Phase 3 阶段才需要。现阶段可以先不部署。
 
@@ -431,7 +458,7 @@ docker run -d `
 
 ---
 
-### A.6 一键启动所有中间件
+### A.7 一键启动所有中间件
 
 为了方便日常开发，在项目中创建统一的 Docker Compose 文件，一键启停所有中间件。
 
@@ -474,10 +501,20 @@ services:
     volumes:
       - pp-rabbitmq-data:/var/lib/rabbitmq
 
+  qdrant:
+    image: qdrant/qdrant
+    container_name: pp-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - pp-qdrant-data:/qdrant/storage
+
 volumes:
   pp-mysql-data:
   pp-redis-data:
   pp-rabbitmq-data:
+  pp-qdrant-data:
 ```
 
 **一键启动**：
@@ -504,6 +541,7 @@ docker compose ps
 | MySQL | localhost | 3306 | root / pp2024 |
 | Redis | localhost | 6379 | 无密码 |
 | RabbitMQ 管理界面 | http://localhost:15672 | 15672 | admin / admin123 |
+| Qdrant | localhost | 6333 | 无认证（REST API） |
 
 ---
 
@@ -769,7 +807,60 @@ D:\software\rabbitmq\sbin\rabbitmq-server.bat
 
 ---
 
-### B.4 各中间件访问信息汇总
+### B.4 Qdrant 安装
+
+Qdrant 是知识库模块（RAG 检索增强问答）使用的向量数据库。后端通过 REST API 与 Qdrant 交互，无需额外 SDK 依赖。
+
+> **说明**：Qdrant 官方提供 Windows 版二进制，单文件运行，非常轻量。
+
+#### 第 1 步：下载
+
+访问 Qdrant GitHub Releases 页面：
+
+```
+https://github.com/qdrant/qdrant/releases
+```
+
+选择最新版本（如 `v1.x.x`），下载 `qdrant-x86_64-pc-windows-msvc.zip` 压缩包。
+
+> **国内加速下载**：如果 GitHub 下载速度慢，可使用代理加速（在原下载地址前加代理前缀）：
+> - ghfast 代理：https://ghfast.top/https://github.com/qdrant/qdrant/releases/latest/download/qdrant-x86_64-pc-windows-msvc.zip
+> - ghproxy 代理：https://ghproxy.net/https://github.com/qdrant/qdrant/releases/latest/download/qdrant-x86_64-pc-windows-msvc.zip
+
+> 官方 Windows 安装说明：https://qdrant.tech/documentation/guides/installation/#windows
+
+#### 第 2 步：解压
+
+将 ZIP 解压到 `D:\software\qdrant`。解压后目录结构大致如下：
+
+```
+D:\software\qdrant\
+├── qdrant.exe
+├── config.yaml
+└── ...
+```
+
+#### 第 3 步：启动 Qdrant
+
+```powershell
+D:\software\qdrant\qdrant.exe
+```
+
+> **提示**：项目中已提供启动脚本 `docs\script\start-qdrant.bat`，双击即可启动（自动检测安装路径，找不到 `qdrant.exe` 时会提示改用 Docker 方式）。
+
+#### 第 4 步：验证
+
+健康检查接口返回 `OK` 即启动成功：
+
+```powershell
+curl http://localhost:6333/readyz
+```
+
+> **端口说明**：`6333` 是 REST API 端口（后端 HTTP 调用），`6334` 是 gRPC 端口。后端连接配置位于 `application.yml` 的 `knowledge.qdrant` 段（默认 `localhost:6333`）。
+
+---
+
+### B.5 各中间件访问信息汇总
 
 无论使用方式 A 还是方式 B，各中间件的访问信息完全一致：
 
@@ -778,13 +869,16 @@ D:\software\rabbitmq\sbin\rabbitmq-server.bat
 | MySQL | localhost | 3306 | root / pp2024 |
 | Redis | localhost | 6379 | 无密码 |
 | RabbitMQ 管理界面 | http://localhost:15672 | 15672 | admin / admin123 |
+| Qdrant | localhost | 6333 | 无认证（REST API） |
 
 **日常启停顺序**（方式 B）：
 
 ```
-启动顺序：① MySQL → ② Redis → ③ RabbitMQ
-停止顺序：③ RabbitMQ → ② Redis → ① MySQL
+启动顺序：① MySQL → ② Redis → ③ RabbitMQ → ④ Qdrant
+停止顺序：④ Qdrant → ③ RabbitMQ → ② Redis → ① MySQL
 ```
+
+> 也可直接使用项目提供的一键脚本：`docs\script\start-all-middleware.bat` / `stop-all-middleware.bat`（已包含 Qdrant 启停步骤）。
 
 > 每个中间件建议在独立的 PowerShell 窗口中运行，方便查看日志和随时停止。
 
@@ -1223,12 +1317,14 @@ pnpm dev
 - [ ] MySQL 连接测试：`docker exec -it pp-mysql mysql -uroot -ppp2024 -e "SELECT 1;"`
 - [ ] Redis 连接测试：`docker exec -it pp-redis redis-cli PING` → 返回 `PONG`
 - [ ] RabbitMQ 管理界面：http://localhost:15672 可访问
+- [ ] Qdrant 健康检查：`curl http://localhost:6333/readyz` → 返回 `OK`
 
 ### 中间件（方式 B：原生 Windows 安装）
 
 - [ ] MySQL 连接测试：`D:\software\mysql-8.0\bin\mysql -uroot -ppp2024 -e "SELECT VERSION();"` → 显示 8.0.x
 - [ ] Redis 连接测试：`D:\software\redis\redis-cli.exe PING` → 返回 `PONG`
 - [ ] RabbitMQ 管理界面：http://localhost:15672 可访问
+- [ ] Qdrant 健康检查：`curl http://localhost:6333/readyz` → 返回 `OK`
 
 ### 后端工程
 

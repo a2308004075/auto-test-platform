@@ -8,6 +8,7 @@
  * 统一页头
  * 左侧标题 + 右侧操作区（slot）
  * 对齐原型列表页的 page-header（api-list.html 等）
+ * title-suffix 插槽：标题右侧附加内容（如详情页的编号+标题）
  */
 interface Props {
   /** 页面标题 */
@@ -22,7 +23,10 @@ defineProps<Props>()
 <template>
   <div class="pro-page-header">
     <div class="pro-page-header-left">
-      <h1 class="pro-page-title">{{ title }}</h1>
+      <div class="pro-page-header-titlerow">
+        <h1 class="pro-page-title">{{ title }}</h1>
+        <slot name="title-suffix" />
+      </div>
       <p v-if="subtitle" class="pro-page-subtitle">{{ subtitle }}</p>
     </div>
     <div class="pro-page-header-right">
@@ -39,6 +43,13 @@ defineProps<Props>()
   margin-bottom: 16px;
 }
 .pro-page-header-left {
+  flex: 1;
+  min-width: 0;
+}
+.pro-page-header-titlerow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   min-width: 0;
 }
 .pro-page-title {

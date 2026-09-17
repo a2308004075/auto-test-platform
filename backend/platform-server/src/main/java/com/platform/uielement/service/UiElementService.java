@@ -10,6 +10,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.platform.common.exception.BusinessException;
 import com.platform.common.exception.ErrorCode;
+import com.platform.knowledge.event.ProjectMaterialChangedEvent;
+import com.platform.knowledge.service.KnowledgeMaterialCollector;
 import com.platform.project.service.ProjectService;
 import com.platform.repository.entity.CodeRepository;
 import com.platform.repository.mapper.CodeRepositoryMapper;
@@ -23,6 +25,7 @@ import com.platform.uielement.parser.FrontendElementParser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,6 +52,7 @@ public class UiElementService {
     private final CodeRepositoryMapper repositoryMapper;
     private final ProjectService projectService;
     private final FrontendElementParser elementParser;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Value("${repository.storage-path}")
     private String storagePath;
@@ -89,6 +93,11 @@ public class UiElementService {
         log.info("界面元素导入完成: projectId={}, repoId={}, files={}, elements={}, failed={}, cost={}ms",
                 projectId, repositoryId, parseResult.getFileCount(), parseResult.getElements().size(),
                 parseResult.getFailedFileCount(), durationMs);
+
+        // 知识库同步：元素重建（覆盖式）后重新采集（采集粒度 = 1 仓库 = 1 知识库文档）
+        eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                projectId, KnowledgeMaterialCollector.SOURCE_UI_ELEMENT, repositoryId));
+
         return response;
     }
 
@@ -145,6 +154,10 @@ public class UiElementService {
         uiElementMapper.delete(new LambdaQueryWrapper<UiElement>()
                 .eq(UiElement::getProjectId, projectId)
                 .eq(UiElement::getRepositoryId, repositoryId));
+
+        // 知识库同步：元素清空后采集为空，同步引擎移除对应知识库文档
+        eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                projectId, KnowledgeMaterialCollector.SOURCE_UI_ELEMENT, repositoryId));
     }
 
     /**
@@ -157,6 +170,10 @@ public class UiElementService {
                 .eq(UiElement::getProjectId, projectId)
                 .eq(UiElement::getRepositoryId, request.getRepositoryId())
                 .eq(UiElement::getFilePath, request.getFilePath()));
+
+        // 知识库同步：文件级删除归入所属仓库重新采集
+        eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                projectId, KnowledgeMaterialCollector.SOURCE_UI_ELEMENT, request.getRepositoryId()));
     }
 
     // ───────────────────── 私有方法 ─────────────────────

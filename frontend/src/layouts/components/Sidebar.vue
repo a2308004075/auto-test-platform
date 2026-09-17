@@ -96,6 +96,15 @@ const homeMenuItem = computed<MenuItem | null>(() => {
   return { key: '/home', label: '首页', path: '/home', chain: [] }
 })
 
+/**
+ * 单菜单页面菜单项（如我的任务）
+ * 路由 meta.singleMenu 标记的页面侧边栏仅显示当前页面自身一个菜单项
+ */
+const singleMenuItem = computed<MenuItem | null>(() => {
+  if (route.meta?.singleMenu !== true) return null
+  return { key: route.path, label: String(route.meta?.title ?? ''), path: route.path, chain: [] }
+})
+
 // ===== 侧边栏选中项与默认展开链（路径匹配，最长前缀优先） =====
 /** 当前激活的菜单项（首页精确匹配，其余最长前缀匹配） */
 const activeMenuItem = computed<MenuItem | null>(() => {
@@ -103,6 +112,9 @@ const activeMenuItem = computed<MenuItem | null>(() => {
 
   // 首页精确匹配
   if (currentPath === '/home') return homeMenuItem.value
+
+  // 单菜单页面（如我的任务）：当前页面自身即唯一菜单项
+  if (singleMenuItem.value) return singleMenuItem.value
 
   // 收集当前上下文的所有菜单项
   let candidates: MenuItem[] = []
@@ -143,6 +155,9 @@ const menuStateKey = computed(() =>
 
 // ===== 菜单点击处理 =====
 function handleMenuSelect(index: string) {
+  // 单菜单页面：唯一菜单项即当前页面，点击不跳转
+  if (singleMenuItem.value) return
+
   // 查找匹配的菜单项并跳转
   const allItems = inProject.value
     ? projectMenuItems.value
@@ -177,8 +192,15 @@ function handleMenuSelect(index: string) {
         mode="vertical"
         @select="handleMenuSelect"
       >
+        <!-- ===== 单菜单页面（如我的任务）：仅显示当前页面一个菜单项 ===== -->
+        <template v-if="singleMenuItem">
+          <el-menu-item :index="singleMenuItem.path">
+            <span>{{ singleMenuItem.label }}</span>
+          </el-menu-item>
+        </template>
+
         <!-- ===== 项目内菜单（层级渲染） ===== -->
-        <template v-if="inProject">
+        <template v-else-if="inProject">
           <template v-for="node in sortedProjectMenus" :key="node.id">
             <SidebarMenuItem :node="node" :path-prefix="String(projectId)" />
           </template>

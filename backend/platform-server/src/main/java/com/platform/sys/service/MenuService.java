@@ -5,14 +5,12 @@
  */
 package com.platform.sys.service;
 
-import cn.hutool.poi.excel.ExcelReader;
-import cn.hutool.poi.excel.ExcelWriter;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.platform.common.exception.BusinessException;
 import com.platform.common.exception.ErrorCode;
 import com.platform.sys.dto.MenuCreateRequest;
-import com.platform.sys.dto.MenuImportResult;
 import com.platform.sys.dto.MenuListItem;
+import com.platform.sys.dto.MenuSortItem;
 import com.platform.sys.dto.MenuTreeNode;
 import com.platform.sys.entity.Menu;
 import com.platform.sys.mapper.MenuMapper;
@@ -21,12 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.multipart.MultipartFile;
 
-import javax.servlet.http.HttpServletResponse;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.net.URLEncoder;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -111,24 +104,6 @@ public class MenuService {
     }
 
     /**
-     * 新增菜单
-     */
-    @Transactional(rollbackFor = Exception.class)
-    public MenuListItem add(MenuCreateRequest request) {
-        Menu menu = new Menu();
-        BeanUtils.copyProperties(request, menu);
-        if (menu.getParentId() == null) {
-            menu.setParentId(0L);
-        }
-        if (menu.getSortNo() == null) {
-            menu.setSortNo(0);
-        }
-        menu.setIsActive(1);
-        menuMapper.insert(menu);
-        return toListItem(menu);
-    }
-
-    /**
      * 更新菜单
      */
     @Transactional(rollbackFor = Exception.class)
@@ -173,229 +148,100 @@ public class MenuService {
         menuMapper.updateById(menu);
     }
 
-    // ===== Excel 导入导出 =====
-
     /**
-     * 导出菜单列表到 Excel
+     * 批量更新菜单层级与顺序（菜单管理编辑模式拖拽保存）
      *
-     * <p>导出所有启用状态的菜单（含顶级目录与子菜单），Excel 通过「上级菜单名称」列表达父子层级。
-     */
-    public void exportMenus(HttpServletResponse response) {
-        LambdaQueryWrapper<Menu> wrapper = new LambdaQueryWrapper<>();
-        wrapper.orderByAsc(Menu::getSortNo)
-                .orderByAsc(Menu::getId);
-        List<Menu> menus = menuMapper.selectList(wrapper);
-
-        // 构建 id → name 映射，用于导出「上级菜单名称」列
-        Map<Long, String> idToName = new HashMap<>();
-        for (Menu menu : menus) {
-            idToName.put(menu.getId(), menu.getName());
-        }
-
-        try {
-            response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-            response.setHeader("Content-Disposition",
-                    "attachment;filename=" + URLEncoder.encode("菜单列表.xlsx", "UTF-8"));
-            OutputStream out = response.getOutputStream();
-            ExcelWriter writer = cn.hutool.poi.excel.ExcelUtil.getWriter(true);
-            // 表头
-            writer.writeCellValue(0, 0, "菜单名称");
-            writer.writeCellValue(1, 0, "上级菜单名称");
-            writer.writeCellValue(2, 0, "菜单类型");
-            writer.writeCellValue(3, 0, "图标");
-            writer.writeCellValue(4, 0, "路由路径");
-            writer.writeCellValue(5, 0, "组件路径");
-            writer.writeCellValue(6, 0, "权限编码");
-            writer.writeCellValue(7, 0, "排序号");
-            // 数据行
-            int rowIndex = 1;
-            for (Menu menu : menus) {
-                String parentName = "";
-                if (menu.getParentId() != null && menu.getParentId() > 0) {
-                    parentName = idToName.getOrDefault(menu.getParentId(), "");
-                }
-                writer.writeCellValue(0, rowIndex, menu.getName() != null ? menu.getName() : "");
-                writer.writeCellValue(1, rowIndex, parentName);
-                writer.writeCellValue(2, rowIndex, menu.getMenuType() != null ? menu.getMenuType() : "");
-                writer.writeCellValue(3, rowIndex, menu.getIcon() != null ? menu.getIcon() : "");
-                writer.writeCellValue(4, rowIndex, menu.getRoutePath() != null ? menu.getRoutePath() : "");
-                writer.writeCellValue(5, rowIndex, menu.getComponent() != null ? menu.getComponent() : "");
-                writer.writeCellValue(6, rowIndex, menu.getPermissionCode() != null ? menu.getPermissionCode() : "");
-                writer.writeCellValue(7, rowIndex, menu.getSortNo() != null ? menu.getSortNo() : 0);
-                rowIndex++;
-            }
-            writer.flush(out, true);
-            writer.close();
-        } catch (IOException e) {
-            log.error("导出菜单 Excel 失败", e);
-            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "导出失败: " + e.getMessage());
-        }
-    }
-
-    /**
-     * 从 Excel 导入菜单（增量更新）
-     *
-     * <p>导入策略：
+     * <p>校验规则：
      * <ul>
-     *     <li>按「上级菜单名称」确定父级：为空表示顶级菜单（parent_id=0）</li>
-     *     <li>按 (parentId, name) 匹配：已存在则更新，不存在则新增</li>
-     *     <li>两轮处理：先处理顶级菜单，再处理子菜单，确保父级先就绪</li>
+     *     <li>parentId=0 表示顶级；否则父菜单必须存在</li>
+     *     <li>目录/菜单只能挂在顶级或目录下；按钮只能挂在菜单下</li>
+     *     <li>禁止循环引用（父级链不得包含自身）</li>
      * </ul>
+     *
+     * @param items 排序项列表（id + parentId + sortNo）
      */
     @Transactional(rollbackFor = Exception.class)
-    public MenuImportResult importMenus(MultipartFile file) {
-        MenuImportResult result = new MenuImportResult();
-        if (file == null || file.isEmpty()) {
-            result.getErrors().add("文件为空");
-            return result;
+    public void batchUpdateSort(List<MenuSortItem> items) {
+        if (items == null || items.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "排序列表不能为空");
         }
 
-        try {
-            ExcelReader reader = cn.hutool.poi.excel.ExcelUtil.getReader(file.getInputStream());
-            List<List<Object>> rows = reader.read();
-            reader.close();
+        List<Menu> allMenus = menuMapper.selectList(null);
+        Map<Long, Menu> menuMap = allMenus.stream()
+                .collect(Collectors.toMap(Menu::getId, m -> m));
 
-            if (rows.size() <= 1) {
-                result.getErrors().add("Excel 无数据行");
-                return result;
+        // 最终态父级映射：提交项覆盖，其余沿用库中现值（用于循环引用检测）
+        Map<Long, Long> parentMap = new HashMap<>();
+        for (Menu menu : allMenus) {
+            parentMap.put(menu.getId(), menu.getParentId());
+        }
+
+        for (MenuSortItem item : items) {
+            if (item.getId() == null || item.getParentId() == null || item.getSortNo() == null) {
+                throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR,
+                        "排序项缺少必填字段（id/parentId/sortNo）");
             }
-
-            // 顶级菜单名称 → ID 映射（包含数据库已有与本批次新增的）
-            Map<String, Long> topMenuNameToId = new HashMap<>();
-            // 预加载已有顶级菜单
-            LambdaQueryWrapper<Menu> topWrapper = new LambdaQueryWrapper<>();
-            topWrapper.eq(Menu::getParentId, 0);
-            List<Menu> existingTopMenus = menuMapper.selectList(topWrapper);
-            for (Menu top : existingTopMenus) {
-                topMenuNameToId.put(top.getName(), top.getId());
+            Menu menu = menuMap.get(item.getId());
+            if (menu == null) {
+                throw new BusinessException(ErrorCode.MENU_NOT_FOUND, "菜单不存在: id=" + item.getId());
             }
-
-            // 收集数据行并区分顶级 / 子级
-            List<List<Object>> topRows = new ArrayList<>();
-            List<List<Object>> childRows = new ArrayList<>();
-            for (int i = 1; i < rows.size(); i++) {
-                List<Object> row = rows.get(i);
-                if (row == null || row.isEmpty()) {
-                    continue;
+            if (item.getId().equals(item.getParentId())) {
+                throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR,
+                        "菜单「" + menu.getName() + "」不能作为自己的上级");
+            }
+            if (item.getParentId() == 0) {
+                if (menu.getMenuType() != null && menu.getMenuType() == 3) {
+                    throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR,
+                            "按钮「" + menu.getName() + "」不能作为顶级菜单");
                 }
-                String parentName = row.size() > 1 ? String.valueOf(row.get(1)).trim() : "";
-                if (parentName.isEmpty()) {
-                    topRows.add(row);
+            } else {
+                Menu parent = menuMap.get(item.getParentId());
+                if (parent == null) {
+                    throw new BusinessException(ErrorCode.MENU_NOT_FOUND,
+                            "菜单「" + menu.getName() + "」的上级菜单不存在: id=" + item.getParentId());
+                }
+                if (menu.getMenuType() != null && menu.getMenuType() == 3) {
+                    if (parent.getMenuType() == null || parent.getMenuType() != 2) {
+                        throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR,
+                                "按钮「" + menu.getName() + "」只能挂在菜单下");
+                    }
                 } else {
-                    childRows.add(row);
-                }
-            }
-
-            // 第一轮：处理顶级菜单
-            for (List<Object> row : topRows) {
-                try {
-                    String name = String.valueOf(row.get(0)).trim();
-                    Long menuId = importSingleMenu(row, 0L, result);
-                    if (menuId != null) {
-                        topMenuNameToId.put(name, menuId);
+                    if (parent.getMenuType() == null || parent.getMenuType() != 1) {
+                        throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR,
+                                "目录/菜单「" + menu.getName() + "」只能挂在顶级或目录下");
                     }
-                } catch (Exception e) {
-                    result.getErrors().add("顶级菜单行: " + e.getMessage());
-                    result.setFailCount(result.getFailCount() + 1);
                 }
             }
+            parentMap.put(item.getId(), item.getParentId());
+        }
 
-            // 第二轮：处理子菜单
-            for (List<Object> row : childRows) {
-                try {
-                    String parentName = String.valueOf(row.get(1)).trim();
-                    Long parentId = topMenuNameToId.get(parentName);
-                    if (parentId == null) {
-                        result.getErrors().add("菜单「" + String.valueOf(row.get(0)).trim()
-                                + "」的上级菜单「" + parentName + "」不存在");
-                        result.setFailCount(result.getFailCount() + 1);
-                        continue;
-                    }
-                    importSingleMenu(row, parentId, result);
-                } catch (Exception e) {
-                    result.getErrors().add("子菜单行: " + e.getMessage());
-                    result.setFailCount(result.getFailCount() + 1);
+        // 循环引用检测：沿父级链上溯，节点重复出现即存在环
+        for (MenuSortItem item : items) {
+            Set<Long> visited = new HashSet<>();
+            Long cur = item.getId();
+            while (cur != null && cur != 0) {
+                if (!visited.add(cur)) {
+                    throw new BusinessException(ErrorCode.RESOURCE_CONFLICT,
+                            "菜单层级存在循环引用: id=" + item.getId());
                 }
+                cur = parentMap.get(cur);
             }
-        } catch (IOException e) {
-            log.error("导入菜单 Excel 失败", e);
-            throw new BusinessException(ErrorCode.EXCEL_IMPORT_FAILED, "文件读取失败: " + e.getMessage());
         }
 
-        log.info("菜单导入完成: 成功={}, 失败={}", result.getSuccessCount(), result.getFailCount());
-        return result;
-    }
-
-    /**
-     * 导入单行菜单（增量更新：按 parentId + name 匹配）
-     *
-     * @return 新增或更新后的菜单 ID，校验失败时返回 null
-     */
-    private Long importSingleMenu(List<Object> row, Long parentId, MenuImportResult result) {
-        String name = row.size() > 0 ? String.valueOf(row.get(0)).trim() : "";
-        if (name.isEmpty()) {
-            result.getErrors().add("菜单名称不能为空");
-            result.setFailCount(result.getFailCount() + 1);
-            return null;
-        }
-
-        int menuType = row.size() > 2 ? parseIntSafe(row.get(2)) : 1;
-        if (menuType < 1 || menuType > 3) {
-            result.getErrors().add("菜单「" + name + "」的类型必须为 1(目录)/2(菜单)/3(按钮)");
-            result.setFailCount(result.getFailCount() + 1);
-            return null;
-        }
-        String icon = row.size() > 3 ? String.valueOf(row.get(3)).trim() : "";
-        String routePath = row.size() > 4 ? String.valueOf(row.get(4)).trim() : "";
-        String component = row.size() > 5 ? String.valueOf(row.get(5)).trim() : "";
-        String permissionCode = row.size() > 6 ? String.valueOf(row.get(6)).trim() : "";
-        int sortNo = row.size() > 7 ? parseIntSafe(row.get(7)) : 0;
-
-        // 按 (parentId, name) 查找是否已存在
-        LambdaQueryWrapper<Menu> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Menu::getParentId, parentId)
-                .eq(Menu::getName, name);
-        Menu existing = menuMapper.selectOne(wrapper);
-
-        if (existing != null) {
-            existing.setMenuType(menuType);
-            existing.setIcon(icon.isEmpty() ? null : icon);
-            existing.setRoutePath(routePath.isEmpty() ? null : routePath);
-            existing.setComponent(component.isEmpty() ? null : component);
-            existing.setPermissionCode(permissionCode.isEmpty() ? null : permissionCode);
-            existing.setSortNo(sortNo);
-            menuMapper.updateById(existing);
-            result.setSuccessCount(result.getSuccessCount() + 1);
-            return existing.getId();
-        } else {
-            Menu menu = new Menu();
-            menu.setParentId(parentId);
-            menu.setName(name);
-            menu.setMenuType(menuType);
-            menu.setIcon(icon.isEmpty() ? null : icon);
-            menu.setRoutePath(routePath.isEmpty() ? null : routePath);
-            menu.setComponent(component.isEmpty() ? null : component);
-            menu.setPermissionCode(permissionCode.isEmpty() ? null : permissionCode);
-            menu.setSortNo(sortNo);
-            menu.setIsActive(1);
-            menuMapper.insert(menu);
-            result.setSuccessCount(result.getSuccessCount() + 1);
-            return menu.getId();
+        // 仅更新发生变化的记录
+        for (MenuSortItem item : items) {
+            Menu menu = menuMap.get(item.getId());
+            if (item.getParentId().equals(menu.getParentId())
+                    && item.getSortNo().equals(menu.getSortNo())) {
+                continue;
+            }
+            menu.setParentId(item.getParentId());
+            menu.setSortNo(item.getSortNo());
+            menuMapper.updateById(menu);
         }
     }
 
     // ===== 私有方法 =====
-
-    private int parseIntSafe(Object value) {
-        if (value == null) {
-            return 0;
-        }
-        try {
-            return Integer.parseInt(String.valueOf(value).trim());
-        } catch (NumberFormatException e) {
-            return 0;
-        }
-    }
 
     private List<Long> findChildIds(Long parentId) {
         LambdaQueryWrapper<Menu> wrapper = new LambdaQueryWrapper<>();

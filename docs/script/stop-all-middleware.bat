@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 chcp 65001 >nul
 setlocal EnableDelayedExpansion
 echo ============================================
@@ -6,7 +6,16 @@ echo   一键停止所有中间件
 echo ============================================
 echo.
 
-echo [1/3] 停止 RabbitMQ ...
+echo [1/4] 停止 Qdrant ...
+taskkill /F /IM qdrant.exe >nul 2>&1
+if !errorlevel!==0 (
+    echo       Qdrant 已停止。
+) else (
+    echo       Qdrant 未在运行。
+)
+ping -n 3 127.0.0.1 >nul
+
+echo [2/4] 停止 RabbitMQ ...
 set ERLANG_HOME=D:\software\erlang
 call D:\software\rabbitmq\sbin\rabbitmqctl.bat stop >nul 2>&1
 if !errorlevel!==0 (
@@ -18,7 +27,7 @@ if !errorlevel!==0 (
 )
 ping -n 3 127.0.0.1 >nul
 
-echo [2/3] 停止 Redis ...
+echo [3/4] 停止 Redis ...
 taskkill /F /IM redis-server.exe >nul 2>&1
 if !errorlevel!==0 (
     echo       Redis 已停止。
@@ -27,7 +36,7 @@ if !errorlevel!==0 (
 )
 ping -n 2 127.0.0.1 >nul
 
-echo [3/3] 停止 MySQL ...
+echo [4/4] 停止 MySQL ...
 D:\software\mysql-8.0\bin\mysqladmin -uroot -ppp2024 shutdown >nul 2>&1
 if !errorlevel!==0 (
     echo       MySQL 已停止。

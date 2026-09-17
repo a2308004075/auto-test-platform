@@ -29,6 +29,11 @@ public class RequirementVersion extends BaseEntity {
     private Long projectId;
 
     /**
+     * 所属分组 ID（指向系统分组「未分组」或用户分组）
+     */
+    private Long groupId;
+
+    /**
      * 版本号
      */
     private String versionName;

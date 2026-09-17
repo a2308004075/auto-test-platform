@@ -45,6 +45,10 @@
         <poi.version>5.2.3</poi.version>
         <jgit.version>5.13.3.202401111512-r</jgit.version>
         <jsoup.version>1.15.4</jsoup.version>
+        <tika.version>1.28.5</tika.version>
+        <pdfbox.version>2.0.31</pdfbox.version>
+        <jai-imageio.version>1.4.0</jai-imageio.version>
+        <javaparser.version>3.26.2</javaparser.version>
     </properties>
 
     <!-- 依赖管理：子模块声明即可，版本由父 POM 统一锁定 -->
@@ -167,6 +171,40 @@
                 <groupId>org.jsoup</groupId>
                 <artifactId>jsoup</artifactId>
                 <version>${jsoup.version}</version>
+            </dependency>
+
+            <!-- Apache Tika（知识库：文档内容提取，支持 PDF/Word/Excel/TXT/HTML 等） -->
+            <dependency>
+                <groupId>org.apache.tika</groupId>
+                <artifactId>tika-core</artifactId>
+                <version>${tika.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tika</groupId>
+                <artifactId>tika-parsers</artifactId>
+                <version>${tika.version}</version>
+            </dependency>
+
+            <!-- Apache PDFBox（知识库：PDF 文档解析，Tika parsers 依赖） -->
+            <dependency>
+                <groupId>org.apache.pdfbox</groupId>
+                <artifactId>pdfbox</artifactId>
+                <version>${pdfbox.version}</version>
+            </dependency>
+
+            <!-- JAI ImageIO（知识库：PDF 内嵌 TIFF/JPEG2000 图片处理） -->
+            <dependency>
+                <groupId>com.github.jai-imageio</groupId>
+                <artifactId>jai-imageio-core</artifactId>
+                <version>${jai-imageio.version}</version>
+            </dependency>
+
+
+            <!-- JavaParser（M17 AI 白盒测试：Java 源码 AST 解析） -->
+            <dependency>
+                <groupId>com.github.javaparser</groupId>
+                <artifactId>javaparser-core</artifactId>
+                <version>${javaparser.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

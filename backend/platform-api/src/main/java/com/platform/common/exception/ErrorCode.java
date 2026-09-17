@@ -24,6 +24,10 @@ package com.platform.common.exception;
  *   <li>2200-2299: M11 测试代码库</li>
  *   <li>2300-2399: M12 界面元素</li>
  *   <li>2400-2499: M13 项目文档</li>
+ *   <li>2500-2599: M14 需求文档</li>
+ *   <li>2600-2699: M15 AI 渗透测试</li>
+ *   <li>2700-2799: M16 知识库</li>
+ *   <li>2800-2899: M17 AI 白盒测试</li>
  * </ul>
  *
  * <p>使用示例：
@@ -138,8 +142,8 @@ public final class ErrorCode {
 
     // ===== 系统管理 (2100-2199) =====
     public static final int MENU_NOT_FOUND = 2100;
-    public static final int DICT_NOT_FOUND = 2101;
-    public static final int CACHE_KEY_NOT_FOUND = 2102;
+    public static final int CUSTOM_FIELD_NOT_FOUND = 2103;
+    public static final int CUSTOM_FIELD_KEY_DUPLICATE = 2104;
 
     // ===== M11 测试代码库 (2200-2299) =====
     public static final int REPOSITORY_NOT_FOUND = 2200;
@@ -160,9 +164,44 @@ public final class ErrorCode {
     public static final int PROJECT_DOC_GROUP_SYSTEM = 2402;
     public static final int PROJECT_DOC_FILE_ERROR = 2403;
 
+    // ===== M14 需求文档 (2500-2599) =====
+    public static final int REQUIREMENT_GROUP_NOT_FOUND = 2500;
+    public static final int REQUIREMENT_GROUP_NAME_DUPLICATE = 2501;
+    public static final int REQUIREMENT_GROUP_SYSTEM = 2502;
+    public static final int REQUIREMENT_GROUP_NOT_EMPTY = 2503;
+
+    // ===== M15 AI 渗透测试 (2600-2699) =====
+    public static final int SCAN_TASK_NOT_FOUND = 2600;
+    public static final int SCAN_ALREADY_RUNNING = 2601;
+    public static final int SCAN_NOT_RUNNING = 2602;
+    public static final int SCAN_REPO_CLONE_FAILED = 2603;
+    public static final int SCAN_REPORT_NOT_FOUND = 2604;
+
+    // ===== M16 知识库 (2700-2799) =====
+    public static final int KB_NOT_FOUND = 2700;
+    public static final int KB_NAME_DUPLICATE = 2701;
+    public static final int KB_PROCESSING = 2702;
+    public static final int KB_DOC_NOT_FOUND = 2710;
+    public static final int KB_DOC_ALREADY_IMPORTED = 2711;
+    public static final int KB_DOC_PARSE_FAILED = 2712;
+    public static final int KB_CONVERSATION_NOT_FOUND = 2720;
+    public static final int KB_LLM_CALL_FAILED = 2730;
+    public static final int KB_EMBEDDING_FAILED = 2731;
+    public static final int KB_QDRANT_UNAVAILABLE = 2732;
+
+    // ===== M17 AI 白盒测试 (2800-2899) =====
+    public static final int WHITEBOX_TASK_NOT_FOUND = 2800;
+    public static final int WHITEBOX_ALREADY_RUNNING = 2801;
+    public static final int WHITEBOX_NOT_RUNNING = 2802;
+    public static final int WHITEBOX_REPO_SYNC_FAILED = 2803;
+    public static final int WHITEBOX_NO_BASELINE = 2804;
+    public static final int WHITEBOX_NO_CHANGES = 2805;
+    public static final int WHITEBOX_LLM_GENERATE_FAILED = 2806;
+    public static final int WHITEBOX_BUILD_FAILED = 2807;
+
     // ===== 业务错误码 → HTTP 状态码映射 =====
     private static final int[] UNAUTHORIZED_CODES = {UNAUTHORIZED, ACCESS_TOKEN_EXPIRED, REFRESH_TOKEN_EXPIRED};
-    private static final int[] FORBIDDEN_CODES = {FORBIDDEN, ADMIN_PROTECTED, ROLE_IS_BUILTIN, AUTO_CASE_GROUP_SYSTEM, ACTION_GROUP_SYSTEM, KEYWORD_GROUP_SYSTEM, MANUAL_CASE_GROUP_SYSTEM, DEFECT_GROUP_SYSTEM, PROJECT_DOC_GROUP_SYSTEM, REPOSITORY_GROUP_SYSTEM};
+    private static final int[] FORBIDDEN_CODES = {FORBIDDEN, ADMIN_PROTECTED, ROLE_IS_BUILTIN, AUTO_CASE_GROUP_SYSTEM, ACTION_GROUP_SYSTEM, KEYWORD_GROUP_SYSTEM, MANUAL_CASE_GROUP_SYSTEM, DEFECT_GROUP_SYSTEM, PROJECT_DOC_GROUP_SYSTEM, REPOSITORY_GROUP_SYSTEM, REQUIREMENT_GROUP_SYSTEM};
 
     public static int toHttpStatus(int errorCode) {
         for (int code : UNAUTHORIZED_CODES) {
@@ -198,10 +237,16 @@ public final class ErrorCode {
             case KEYWORD_GROUP_NOT_FOUND:
             case ROLE_NOT_FOUND:
             case MENU_NOT_FOUND:
-            case DICT_NOT_FOUND:
-            case CACHE_KEY_NOT_FOUND:
+            case CUSTOM_FIELD_NOT_FOUND:
             case REPOSITORY_NOT_FOUND:
             case REPOSITORY_GROUP_NOT_FOUND:
+            case REQUIREMENT_GROUP_NOT_FOUND:
+            case SCAN_TASK_NOT_FOUND:
+            case SCAN_REPORT_NOT_FOUND:
+            case KB_NOT_FOUND:
+            case KB_DOC_NOT_FOUND:
+            case KB_CONVERSATION_NOT_FOUND:
+            case WHITEBOX_TASK_NOT_FOUND:
                 return 404;
             case RESOURCE_CONFLICT:
             case API_DEPENDENCY_CONFLICT:
@@ -222,10 +267,32 @@ public final class ErrorCode {
             case REPOSITORY_NAME_DUPLICATE:
             case REPOSITORY_GROUP_NAME_DUPLICATE:
             case REPOSITORY_GROUP_NOT_EMPTY:
+            case REQUIREMENT_GROUP_NAME_DUPLICATE:
+            case REQUIREMENT_GROUP_NOT_EMPTY:
             case API_MODULE_NAME_DUPLICATE:
+            case CUSTOM_FIELD_KEY_DUPLICATE:
                 return 409;
             case EXECUTION_QUEUE_FULL:
                 return 429;
+            case KB_NAME_DUPLICATE:
+                return 409;
+            case KB_PROCESSING:
+            case KB_DOC_ALREADY_IMPORTED:
+                return 409;
+            case SCAN_ALREADY_RUNNING:
+            case SCAN_NOT_RUNNING:
+            case SCAN_REPO_CLONE_FAILED:
+                return 409;
+            case WHITEBOX_ALREADY_RUNNING:
+            case WHITEBOX_NOT_RUNNING:
+            case WHITEBOX_REPO_SYNC_FAILED:
+            case WHITEBOX_NO_CHANGES:
+                return 409;
+            case WHITEBOX_NO_BASELINE:
+                return 400;
+            case WHITEBOX_LLM_GENERATE_FAILED:
+            case WHITEBOX_BUILD_FAILED:
+                return 500;
             default:
                 return 500;
         }

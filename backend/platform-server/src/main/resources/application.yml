@@ -38,6 +38,12 @@ spring:
 server:
   port: 8080
 
+# 日志级别配置
+logging:
+  level:
+    # 抑制 Tika 可选解析器探测警告（SQLite/TIFF 等缺依赖的 WARN 无害但刷屏）
+    org.apache.tika: ERROR
+
 # 应用基础配置
 application:
   name: auto-test-platform
@@ -76,4 +82,53 @@ repository:
 doc:
   # 文档存储根目录（相对启动目录，按项目 ID 分目录）
   storage-path: ./data/docs
+
+# AI 渗透测试配置（M15）
+ai-pentest:
+  scan-timeout-seconds: 7200
+  max-concurrent-scans: 1
+  temp-dir: ./data/pentest
+
+# 知识库配置（V48）
+knowledge:
+  llm:
+    # OpenAI 兼容 API 基础地址（可配置为 DeepSeek/通义千问等）
+    base-url: ${LLM_BASE_URL:https://api.openai.com/v1}
+    api-key: ${LLM_API_KEY:sk-xxx}
+    chat-model: ${LLM_CHAT_MODEL:gpt-4o-mini}
+    embedding-model: ${LLM_EMBEDDING_MODEL:text-embedding-3-small}
+    embedding-dimension: 1536
+    max-tokens: 4096
+    temperature: 0.7
+    timeout-seconds: 120
+  qdrant:
+    host: ${QDRANT_HOST:localhost}
+    port: ${QDRANT_PORT:6333}
+    collection-prefix: kb_
+  chunking:
+    chunk-size: 500
+    chunk-overlap: 50
+
+# AI 白盒测试配置（M17）
+ai-whitebox:
+  # 同时执行的白盒任务数（单线程串行，避免并发构建冲突）
+  max-concurrent-tasks: 1
+  # 临时目录（报告等中间产物）
+  temp-dir: ./data/whitebox
+  # 构建被测项目的 JAVA_HOME（空=继承服务器环境变量）
+  java-home: ""
+  # mvnw 构建/测试超时（秒）
+  mvn-timeout-seconds: 600
+  # 编译失败 LLM 自动修复最大轮数
+  compile-fix-rounds: 3
+  # 执行失败 LLM 自动修复最大轮数
+  exec-fix-rounds: 3
+  # 质量不达标 LLM 重写最大轮数
+  quality-rewrite-rounds: 1
+  # 变异得分阈值（%），低于触发重写
+  mutation-threshold: 60
+  # 分支覆盖率阈值（%），低于触发重写
+  branch-coverage-threshold: 75
+  # 单任务变更方法数上限（token 保护）
+  max-methods-per-task: 20
 
