@@ -269,8 +269,8 @@ public class AuthService {
     /**
      * 更新个人资料（当前用户修改自己的资料）
      *
-     * <p>admin 账号不允许修改用户名和显示名；非 admin 用户可修改两者。
-     * 修改用户名时校验唯一性和保留字。
+     * <p>superAdmin 账号不允许修改账号（username）；显示名（displayName）允许修改。
+     * 非 admin 用户可修改两者。修改用户名时校验唯一性和保留字。
      */
     @Transactional(rollbackFor = Exception.class)
     public UserResponse updateProfile(Long userId, ProfileUpdateRequest request) {
@@ -281,18 +281,16 @@ public class AuthService {
 
         boolean isAdmin = RESERVED_USERNAME.equalsIgnoreCase(user.getUsername());
 
-        // superAdmin 账号保护：不允许修改用户名和显示名
+        // superAdmin 账号保护：不允许修改账号（username）
         if (isAdmin) {
-            if (request.getDisplayName() != null && !request.getDisplayName().equals(user.getDisplayName())) {
-                throw new BusinessException(ErrorCode.ADMIN_PROTECTED, "系统管理员账号不允许修改显示名");
-            }
             if (request.getUsername() != null && !request.getUsername().equals(user.getUsername())) {
                 throw new BusinessException(ErrorCode.ADMIN_PROTECTED, "系统管理员账号不允许修改账号");
             }
         }
 
-        // 更新显示名
-        if (request.getDisplayName() != null && !request.getDisplayName().isEmpty()) {
+        // 更新显示名（仅在值发生变化时校验保留字，允许 superAdmin 保持当前显示名）
+        if (request.getDisplayName() != null && !request.getDisplayName().isEmpty()
+                && !request.getDisplayName().equals(user.getDisplayName())) {
             if (RESERVED_DISPLAY_NAME.equals(request.getDisplayName())
                     || SUPER_ADMIN_DISPLAY_NAME.equals(request.getDisplayName())) {
                 throw new BusinessException(ErrorCode.ACCOUNT_RESERVED,

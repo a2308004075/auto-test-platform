@@ -16,6 +16,7 @@ import com.platform.project.entity.Project;
 import com.platform.project.service.ProjectService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -63,7 +64,7 @@ class ApiServiceDefaultHeaderTest {
         ApiService apiService = new ApiService(
                 apiMapper, apiKeywordMapper, keywordMapper,
                 projectService, environmentService, apiModuleService,
-                apiSyncConfigMapper, objectMapper
+                apiSyncConfigMapper, objectMapper, mock(ApplicationEventPublisher.class)
         );
 
         when(projectService.findActiveById(anyLong())).thenReturn(new Project());
@@ -107,7 +108,7 @@ class ApiServiceDefaultHeaderTest {
         ApiService apiService = new ApiService(
                 apiMapper, apiKeywordMapper, keywordMapper,
                 projectService, environmentService, apiModuleService,
-                apiSyncConfigMapper, objectMapper
+                apiSyncConfigMapper, objectMapper, mock(ApplicationEventPublisher.class)
         );
 
         when(projectService.findActiveById(anyLong())).thenReturn(new Project());
@@ -156,7 +157,7 @@ class ApiServiceDefaultHeaderTest {
         ApiService apiService = new ApiService(
                 apiMapper, apiKeywordMapper, keywordMapper,
                 projectService, environmentService, apiModuleService,
-                apiSyncConfigMapper, objectMapper
+                apiSyncConfigMapper, objectMapper, mock(ApplicationEventPublisher.class)
         );
 
         when(projectService.findActiveById(anyLong())).thenReturn(new Project());
@@ -191,7 +192,7 @@ class ApiServiceDefaultHeaderTest {
         ApiService apiService = new ApiService(
                 apiMapper, apiKeywordMapper, keywordMapper,
                 projectService, environmentService, apiModuleService,
-                apiSyncConfigMapper, objectMapper
+                apiSyncConfigMapper, objectMapper, mock(ApplicationEventPublisher.class)
         );
 
         java.lang.reflect.Method method = ApiService.class.getDeclaredMethod("parseHeadersText", String.class);

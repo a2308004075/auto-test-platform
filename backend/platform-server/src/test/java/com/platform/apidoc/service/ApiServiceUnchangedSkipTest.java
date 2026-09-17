@@ -12,6 +12,7 @@ import com.platform.keyword.mapper.KeywordMapper;
 import com.platform.project.service.ProjectService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.Collections;
 
@@ -45,7 +46,7 @@ class ApiServiceUnchangedSkipTest {
         return new ApiService(
                 apiMapper, mock(ApiKeywordMapper.class), mock(KeywordMapper.class),
                 mock(ProjectService.class), mock(EnvironmentService.class), mock(ApiModuleService.class),
-                mock(ApiSyncConfigMapper.class), new ObjectMapper()
+                mock(ApiSyncConfigMapper.class), new ObjectMapper(), mock(ApplicationEventPublisher.class)
         );
     }
 

@@ -16,6 +16,7 @@ import com.platform.keyword.mapper.KeywordMapper;
 import com.platform.project.service.ProjectService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -50,7 +51,7 @@ class ApiServiceHostPrefixTest {
         return new ApiService(
                 apiMapper, mock(ApiKeywordMapper.class), mock(KeywordMapper.class),
                 mock(ProjectService.class), environmentService, apiModuleService,
-                apiSyncConfigMapper, new ObjectMapper()
+                apiSyncConfigMapper, new ObjectMapper(), mock(ApplicationEventPublisher.class)
         );
     }
 

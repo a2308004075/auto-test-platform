@@ -6,21 +6,20 @@
 <script setup lang="ts">
 /**
  * 菜单管理页面（仅 ADMIN）
- * 树形结构 + Popover 右键菜单（新增/编辑/删除/启停）
+ * 树形结构 + Popover 右键菜单（编辑/删除/启停）
  * 对标 svc-manager-web Menu.vue
  */
 import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getMenuTree,
-  addMenu,
   updateMenu,
   deleteMenu,
   toggleMenuStatus,
-  exportMenus,
-  importMenus,
+  sortMenus,
   type MenuTreeNode,
   type MenuCreateRequest,
+  type MenuSortItem,
 } from '@/api/menu'
 import { getRegisteredComponents } from '@/utils/componentRegistry'
 import { usePermissionStore } from '@/stores'
@@ -40,9 +39,7 @@ const defaultExpandedKeys = ref<number[]>([])
 
 // ===== 弹窗 =====
 const dialogVisible = ref(false)
-const isEdit = ref(false)
 const editingId = ref<number | null>(null)
-const parentMenu = ref<MenuTreeNode | null>(null)
 const flatMenuList = ref<MenuTreeNode[]>([])
 
 const form = reactive<MenuCreateRequest & { parentId: number }>({
@@ -65,9 +62,83 @@ const menuTypeOptions = [
 // ===== 可选组件列表（从注册表获取） =====
 const componentOptions = getRegisteredComponents()
 
-// ===== Excel 导入 =====
-const importInputRef = ref<HTMLInputElement | null>(null)
-const importing = ref(false)
+// ===== 排序编辑模式（拖拽调整目录/菜单的层级与顺序） =====
+const sortMode = ref(false)
+const saving = ref(false)
+/** 进入编辑模式时的树快照（取消时还原） */
+let sortSnapshot: MenuTreeNode[] = []
+
+/** 进入编辑模式：拍快照、展开全部节点、禁用其他操作 */
+function enterSortMode() {
+  sortSnapshot = JSON.parse(JSON.stringify(treeData.value))
+  sortMode.value = true
+  closeContextMenu()
+}
+
+/** 仅目录/菜单可拖动，按钮不可单独拖动（跟随父级整体移动） */
+function allowDrag(node: any) {
+  return node.data.menuType === 1 || node.data.menuType === 2
+}
+
+/** dropNode 是否为 draggingNode 的子孙节点（禁止拖入自身子树，防循环） */
+function isDescendantNode(draggingNode: any, dropNode: any): boolean {
+  let parent = dropNode.parent
+  while (parent && parent.level > 0) {
+    if (parent.data && parent.data.id === draggingNode.data.id) return true
+    parent = parent.parent
+  }
+  return false
+}
+
+/**
+ * 拖拽放置约束：
+ * - inner：目录/菜单只能放入目录内部（允许目录嵌套）
+ * - prev/next：不能与按钮同级（按钮层级只能挂在菜单下）
+ */
+function allowDrop(draggingNode: any, dropNode: any, dropType: string) {
+  if (isDescendantNode(draggingNode, dropNode)) return false
+  if (dropType === 'inner') {
+    return dropNode.data.menuType === 1
+  }
+  return dropNode.data.menuType !== 3
+}
+
+/** 遍历树收集排序项（parentId 按当前层级，sortNo 按同级顺序） */
+function collectSortItems(nodes: MenuTreeNode[], parentId: number, result: MenuSortItem[]) {
+  nodes.forEach((node, index) => {
+    result.push({ id: node.id, parentId, sortNo: index })
+    if (node.children && node.children.length) {
+      collectSortItems(node.children, node.id, result)
+    }
+  })
+}
+
+/** 保存拖拽后的层级与顺序 */
+async function handleSortSave() {
+  const items: MenuSortItem[] = []
+  collectSortItems(treeData.value, 0, items)
+  saving.value = true
+  try {
+    await sortMenus(items)
+    ElMessage.success('菜单层级与顺序已保存')
+    sortMode.value = false
+    sortSnapshot = []
+    await fetchTree()
+    // 同步刷新侧边栏的菜单树
+    permissionStore.reloadMenuTree()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+/** 取消编辑：还原进入编辑模式时的树快照 */
+function handleSortCancel() {
+  treeData.value = sortSnapshot
+  sortMode.value = false
+  sortSnapshot = []
+}
 
 // ===== 加载菜单树 =====
 async function fetchTree() {
@@ -95,41 +166,9 @@ function flattenTree(nodes: MenuTreeNode[]): MenuTreeNode[] {
   return result
 }
 
-// ===== 新增子菜单 =====
-function handleAppend(data: MenuTreeNode) {
-  isEdit.value = false
-  editingId.value = null
-  parentMenu.value = data
-  form.parentId = data.id
-  form.name = ''
-  form.menuType = 2
-  form.icon = ''
-  form.routePath = ''
-  form.component = ''
-  form.sortNo = 0
-  dialogVisible.value = true
-}
-
-// ===== 新增顶级菜单 =====
-function handleAddRoot() {
-  isEdit.value = false
-  editingId.value = null
-  parentMenu.value = null
-  form.parentId = 0
-  form.name = ''
-  form.menuType = 1
-  form.icon = ''
-  form.routePath = ''
-  form.component = ''
-  form.sortNo = 0
-  dialogVisible.value = true
-}
-
 // ===== 编辑菜单 =====
 function handleEdit(data: MenuTreeNode) {
-  isEdit.value = true
   editingId.value = data.id
-  parentMenu.value = null
   form.parentId = data.parentId
   form.name = data.name
   form.menuType = data.menuType
@@ -156,13 +195,9 @@ async function handleSave() {
       component: form.component || undefined,
       sortNo: form.sortNo || 0,
     }
-    if (isEdit.value && editingId.value !== null) {
-      await updateMenu(editingId.value, req)
-      ElMessage.success('菜单更新成功')
-    } else {
-      await addMenu(req)
-      ElMessage.success('菜单新增成功')
-    }
+    if (editingId.value === null) return
+    await updateMenu(editingId.value, req)
+    ElMessage.success('菜单更新成功')
     dialogVisible.value = false
     fetchTree()
     // 同步刷新侧边栏的菜单树
@@ -215,57 +250,12 @@ async function handleToggle(data: MenuTreeNode) {
   }
 }
 
-// ===== Excel 导出 =====
-async function handleExport() {
-  try {
-    const res: any = await exportMenus()
-    const blob = new Blob([res], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    })
-    const url = window.URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = '菜单列表.xlsx'
-    link.click()
-    window.URL.revokeObjectURL(url)
-    ElMessage.success('导出成功')
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.message || '导出失败')
-  }
-}
-
-// ===== Excel 导入 =====
-function triggerImport() {
-  importInputRef.value?.click()
-}
-
-async function handleImportFile(e: Event) {
-  const input = e.target as HTMLInputElement
-  if (!input.files || input.files.length === 0) return
-  importing.value = true
-  try {
-    const res: any = await importMenus(input.files[0])
-    const data = res.data
-    const msg = `导入完成：成功 ${data.successCount} 条，失败 ${data.failCount} 条`
-    if (data.failCount > 0) {
-      ElMessage.warning(msg)
-    } else {
-      ElMessage.success(msg)
-    }
-    fetchTree()
-    permissionStore.reloadMenuTree()
-  } catch (err: any) {
-    ElMessage.error(err?.response?.data?.message || '导入失败')
-  } finally {
-    importing.value = false
-    input.value = ''
-  }
-}
-
 // ===== 右键菜单显示/隐藏控制 =====
 function handleContextMenu(event: Event, id: number) {
   event.preventDefault()
   event.stopPropagation()
+  // 编辑模式下禁用右键菜单（只允许拖拽）
+  if (sortMode.value) return
   activeMenuId.value = id
 }
 
@@ -293,17 +283,29 @@ onBeforeUnmount(() => {
 <template>
   <div class="menu">
     <PageHeader title="菜单管理">
-      <el-button v-if="hasPermission('system:menu:add')" type="primary" @click="handleAddRoot">新增顶级菜单</el-button>
-      <el-button v-if="hasPermission('system:menu:import')" :loading="importing" @click="triggerImport">导入</el-button>
-      <el-button v-if="hasPermission('system:menu:export')" @click="handleExport">导出</el-button>
+      <template v-if="!sortMode">
+        <el-button v-if="hasPermission('system:menu:edit')" @click="enterSortMode">编辑</el-button>
+      </template>
+      <template v-else>
+        <el-button type="primary" :loading="saving" @click="handleSortSave">保存</el-button>
+        <el-button :disabled="saving" @click="handleSortCancel">取消</el-button>
+      </template>
     </PageHeader>
-    <div v-loading="loading" class="menu-list">
+    <div v-if="sortMode" class="sort-tip">
+      编辑模式：拖动「目录 / 菜单」节点调整层级与顺序（虚线框 = 放入内部，横线 = 同级顺序），完成后点击「保存」生效
+    </div>
+    <div v-loading="loading" :class="['menu-list', { sorting: sortMode }]">
       <el-tree
+        :key="sortMode ? 'sort' : 'view'"
         :data="treeData"
         node-key="id"
         :default-expanded-keys="defaultExpandedKeys"
+        :default-expand-all="sortMode"
         :expand-on-click-node="false"
         :props="{ label: 'name', children: 'children' }"
+        :draggable="sortMode"
+        :allow-drag="allowDrag"
+        :allow-drop="allowDrop"
         highlight-current
       >
         <template #default="{ data }">
@@ -315,7 +317,6 @@ onBeforeUnmount(() => {
             :width="100"
           >
             <div class="button-list" @click="closeContextMenu">
-              <el-button v-if="hasPermission('system:menu:add')" link type="primary" @click="handleAppend(data)">新增</el-button>
               <el-button v-if="hasPermission('system:menu:edit')" link type="primary" @click="handleEdit(data)">编辑</el-button>
               <el-button
                 v-if="hasPermission('system:menu:toggle')"
@@ -343,11 +344,11 @@ onBeforeUnmount(() => {
       </el-tree>
     </div>
 
-    <!-- 新增/编辑弹窗 -->
+    <!-- 编辑弹窗 -->
     <el-dialog
       v-model="dialogVisible"
       draggable
-      :title="isEdit ? '编辑菜单' : '新增菜单'"
+      title="编辑菜单"
       :close-on-click-modal="false"
     >
       <el-form :model="form" label-width="90px">
@@ -403,14 +404,6 @@ onBeforeUnmount(() => {
         <el-button type="primary" @click="handleSave">确定</el-button>
       </template>
     </el-dialog>
-
-    <input
-      ref="importInputRef"
-      type="file"
-      accept=".xlsx,.xls"
-      style="display: none;"
-      @change="handleImportFile"
-    />
   </div>
 </template>
 
@@ -418,6 +411,7 @@ onBeforeUnmount(() => {
 .menu {
   display: flex;
   flex-direction: column;
+  height: 100%;
 }
 
 .menu-list {
@@ -428,7 +422,6 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   padding: 8px;
   border: 1px solid var(--border-color-base, #dcdfe6);
-  min-height: 400px;
 }
 
 .tree-node-label {
@@ -456,6 +449,20 @@ onBeforeUnmount(() => {
 .type-tag {
   transform: scale(0.85);
   transform-origin: left center;
+}
+
+.sort-tip {
+  margin: 0 24px;
+  padding: 8px 12px;
+  background-color: var(--el-color-primary-light-9, #ecf5ff);
+  border: 1px solid var(--el-color-primary-light-7, #c6e2ff);
+  border-radius: 4px;
+  color: var(--el-text-color-regular, #606266);
+  font-size: 13px;
+}
+
+.menu-list.sorting .tree-node-label {
+  cursor: grab;
 }
 
 .status-tag {

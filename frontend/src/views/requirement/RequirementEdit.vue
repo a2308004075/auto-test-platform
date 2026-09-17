@@ -17,7 +17,9 @@ import {
   createRequirementItem,
   updateRequirementItem,
 } from '@/api/requirement'
+import { getCustomFieldsForRender } from '@/api/customField'
 import PageHeader from '@/components/PageHeader/index.vue'
+import DynamicFieldGrid from '@/components/DynamicFieldGrid/index.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -30,6 +32,10 @@ const versionId = computed(() => Number(route.query.versionId) || 0)
 const loading = ref(false)
 const saving = ref(false)
 const formRef = ref<FormInstance>()
+
+// 动态字段
+const customFields = ref<any[]>([])
+const customFieldValues = ref<Record<string, any>>({})
 
 const form = reactive({
   title: '',
@@ -83,6 +89,7 @@ async function handleSave() {
         status: form.status,
         assignee: form.assignee || undefined,
         deadline: form.deadline || undefined,
+        customFields: { ...customFieldValues.value },
       }
       if (isNew.value) {
         if (!versionId.value) {
@@ -108,7 +115,32 @@ function handleCancel() {
   router.push(`/project/${projectId.value}/requirements`)
 }
 
-onMounted(fetchDetail)
+onMounted(() => {
+  fetchDetail()
+  fetchCustomFields()
+})
+
+async function fetchCustomFields() {
+  try {
+    const viewType = isNew.value ? 'create' : 'edit'
+    const res: any = await getCustomFieldsForRender({
+      projectId: projectId.value,
+      module: 'requirement',
+      viewType,
+    })
+    customFields.value = res.data || []
+    // 初始化默认值
+    for (const field of customFields.value) {
+      if (field.defaultValue !== null && field.defaultValue !== undefined && field.defaultValue !== '') {
+        if (customFieldValues.value[field.fieldKey] === undefined) {
+          customFieldValues.value[field.fieldKey] = field.defaultValue
+        }
+      }
+    }
+  } catch {
+    customFields.value = []
+  }
+}
 </script>
 
 <template>
@@ -172,6 +204,16 @@ onMounted(fetchDetail)
               />
             </el-form-item>
           </div>
+        </div>
+
+        <!-- 动态字段 -->
+        <div v-if="customFields.length > 0" class="form-section">
+          <div class="form-section-title">字段信息</div>
+          <DynamicFieldGrid
+            :fields="customFields"
+            :model-value="customFieldValues"
+            @update:model-value="customFieldValues = $event"
+          />
         </div>
       </el-form>
     </div>

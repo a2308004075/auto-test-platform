@@ -7,9 +7,34 @@ import request from './request'
 
 // ===== 类型定义 =====
 
+export interface RequirementGroup {
+  id: number
+  projectId: number
+  parentId: number | null
+  name: string
+  description: string | null
+  isSystem: number
+  itemCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface RequirementGroupCreateRequest {
+  name: string
+  description?: string
+  parentId?: number | null
+}
+
+export interface RequirementGroupUpdateRequest {
+  name?: string
+  description?: string
+  parentId?: number | null
+}
+
 export interface RequirementVersion {
   id: number
   projectId: number
+  groupId: number
   versionName: string
   description: string | null
   status: string
@@ -41,6 +66,7 @@ export interface RequirementVersionCreateRequest {
   status?: string
   startDate?: string
   endDate?: string
+  groupId?: number | null
 }
 
 export interface RequirementItemCreateRequest {
@@ -51,6 +77,28 @@ export interface RequirementItemCreateRequest {
   status?: string
   assignee?: string
   deadline?: string
+}
+
+// ===== 分组 API =====
+
+/** 查询项目下的分组列表 */
+export function getRequirementGroups(projectId: number) {
+  return request.get(`/v1/projects/${projectId}/requirement-groups`)
+}
+
+/** 创建分组 */
+export function createRequirementGroup(projectId: number, data: RequirementGroupCreateRequest) {
+  return request.post(`/v1/projects/${projectId}/requirement-groups`, data)
+}
+
+/** 更新分组 */
+export function updateRequirementGroup(projectId: number, groupId: number, data: RequirementGroupUpdateRequest) {
+  return request.post(`/v1/projects/${projectId}/requirement-groups/${groupId}`, data)
+}
+
+/** 删除分组 */
+export function deleteRequirementGroup(projectId: number, groupId: number) {
+  return request.post(`/v1/projects/${projectId}/requirement-groups/${groupId}/delete`)
 }
 
 // ===== 版本 API =====

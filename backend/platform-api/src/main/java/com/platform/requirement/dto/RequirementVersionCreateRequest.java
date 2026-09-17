@@ -19,6 +19,11 @@ public class RequirementVersionCreateRequest {
 
     private Long projectId;
 
+    /**
+     * 所属分组 ID（为空时默认归属项目「未分组」系统分组）
+     */
+    private Long groupId;
+
     @NotBlank(message = "版本号不能为空")
     @Size(max = 100, message = "版本号长度不能超过 100")
     private String versionName;

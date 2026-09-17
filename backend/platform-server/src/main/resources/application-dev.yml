@@ -26,6 +26,16 @@ spring:
 jwt:
   secret: dev-secret-key-auto-test-platform-2024-change-in-production
 
+# 知识库 LLM 配置（百炼 OpenAI 兼容模式）
+# API Key 通过环境变量 LLM_API_KEY 注入，或直接修改下方默认值
+knowledge:
+  llm:
+    base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api-key: ${LLM_API_KEY:sk-xxx}
+    chat-model: ${LLM_CHAT_MODEL:qwen-plus}
+    embedding-model: ${LLM_EMBEDDING_MODEL:text-embedding-v4}
+    embedding-dimension: 1536
+
 # 日志级别与文件输出由 logback-spring.xml 统一管理
 
 # MyBatis-Plus 日志配置继承 application.yml，此处不再重复声明

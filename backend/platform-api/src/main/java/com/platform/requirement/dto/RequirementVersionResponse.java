@@ -20,6 +20,8 @@ public class RequirementVersionResponse {
 
     private Long projectId;
 
+    private Long groupId;
+
     private String versionName;
 
     private String description;

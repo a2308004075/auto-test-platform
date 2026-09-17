@@ -11,6 +11,7 @@ import javax.validation.constraints.Size;
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Map;
 
 /**
  * 缺陷更新请求（支持部分更新）
@@ -59,4 +60,9 @@ public class DefectUpdateRequest implements Serializable {
     private BigDecimal actualHours;
 
     private BigDecimal remainingHours;
+
+    /**
+     * 自定义字段值（fieldKey -> 值，由【字段管理】动态配置驱动）
+     */
+    private Map<String, String> customFields;
 }

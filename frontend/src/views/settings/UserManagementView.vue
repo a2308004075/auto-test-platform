@@ -256,7 +256,7 @@ async function handleEditUser() {
     editError.value = '请输入用户名'
     return
   }
-  if (RESERVED_DISPLAY_NAMES.includes(displayName)) {
+  if (RESERVED_DISPLAY_NAMES.includes(displayName) && displayName !== editingUser.value.displayName) {
     editError.value = '用户名不能为"' + displayName + '"，该名称为系统保留'
     return
   }
@@ -461,6 +461,7 @@ onMounted(() => { fetchUsers(); fetchRoles() })
             <template #default="{ row }">
               <div class="um-actions">
                 <template v-if="isAdminRow(row)">
+                  <el-button v-if="hasPermission('system:user:edit')" type="primary" link size="small" @click="openEditUser(row)">编辑</el-button>
                   <el-button type="primary" link size="small" @click="openResetPassword(row)">重置密码</el-button>
                 </template>
                 <template v-else>
@@ -532,7 +533,7 @@ onMounted(() => { fetchUsers(); fetchRoles() })
           <div v-if="editError" class="um-error-msg">{{ editError }}</div>
         </el-form-item>
         <el-form-item label="角色">
-          <el-select v-model="editForm.roleId" style="width: 100%;">
+          <el-select v-model="editForm.roleId" style="width: 100%;" :disabled="isAdminRow(editingUser)">
             <el-option v-for="role in roleList" :key="role.id" :value="role.id" :label="`${role.roleName}（${role.roleCode}）`" />
           </el-select>
         </el-form-item>

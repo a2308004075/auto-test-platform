@@ -127,7 +127,9 @@ public class RoleService {
             throw new NotFoundException("角色", id);
         }
         RoleResponse response = toResponse(role);
-        response.setPermissions(rolePermissionMapper.selectPermissionAssignmentsByRoleId(id));
+        response.setPermissions(isBuiltinRoleCode(role.getRoleCode())
+                ? buildFullPermissionAssignments()
+                : rolePermissionMapper.selectPermissionAssignmentsByRoleId(id));
         return response;
     }
 
@@ -263,9 +265,49 @@ public class RoleService {
 
     /**
      * 获取角色已分配的权限列表（含按角色 control_mode）
+     *
+     * <p>SUPER_ADMIN 和 ADMIN 内置角色隐式持有全部权限（不存储于 role_permission 表），
+     * 直接由 permission 表全量构造，保证角色管理页面的权限树展示与实际授权一致。</p>
      */
     public List<PermissionAssignmentDTO> getRolePermissions(Long roleId) {
+        if (roleId == null) {
+            return Collections.emptyList();
+        }
+        UserRole role = userRoleMapper.selectById(roleId);
+        if (role == null) {
+            return Collections.emptyList();
+        }
+        if (isBuiltinRoleCode(role.getRoleCode())) {
+            return buildFullPermissionAssignments();
+        }
         return rolePermissionMapper.selectPermissionAssignmentsByRoleId(roleId);
+    }
+
+    /**
+     * 判断角色编码是否为内置角色（SUPER_ADMIN / ADMIN）
+     */
+    private boolean isBuiltinRoleCode(String roleCode) {
+        return BUILTIN_ROLE_CODE.equalsIgnoreCase(roleCode)
+                || BUILTIN_SUPER_ROLE_CODE.equalsIgnoreCase(roleCode);
+    }
+
+    /**
+     * 构造全量权限分配列表（内置角色隐式持有全部权限）
+     *
+     * <p>MENU 类型 controlMode 为 null，BUTTON 类型固定 enabled
+     * （内置角色的按钮全部可点击，不依赖 role_permission 表）。</p>
+     */
+    private List<PermissionAssignmentDTO> buildFullPermissionAssignments() {
+        LambdaQueryWrapper<Permission> wrapper = new LambdaQueryWrapper<>();
+        wrapper.orderByAsc(Permission::getSortOrder)
+                .orderByAsc(Permission::getId);
+        List<Permission> allPermissions = permissionMapper.selectList(wrapper);
+        return allPermissions.stream().map(p -> {
+            PermissionAssignmentDTO dto = new PermissionAssignmentDTO();
+            dto.setPermissionId(p.getId());
+            dto.setControlMode("BUTTON".equalsIgnoreCase(p.getType()) ? "enabled" : null);
+            return dto;
+        }).collect(Collectors.toList());
     }
 
     /**
@@ -304,6 +346,36 @@ public class RoleService {
             return Collections.singletonList("*");
         }
         return rolePermissionMapper.selectPermissionCodesByRoleId(roleId);
+    }
+
+    /**
+     * 获取角色可用于后端鉴权的权限编码列表
+     *
+     * <p>面向 Spring Security hasAuthority 校验：SUPER_ADMIN 和 ADMIN 内置角色
+     * 展开为 permission 表全部启用权限编码（等价于前端通配符 "*" 语义），
+     * 其他角色返回 role_permission 实际分配的权限编码。
+     * 与 {@link #getPermissionCodesByRoleId(Long)}（返回 "*" 供前端匹配）不同。
+     */
+    public List<String> getAuthorityCodesByRoleId(Long roleId) {
+        if (roleId == null) {
+            return Collections.emptyList();
+        }
+        UserRole role = userRoleMapper.selectById(roleId);
+        if (role == null) {
+            return Collections.emptyList();
+        }
+        if (BUILTIN_ROLE_CODE.equalsIgnoreCase(role.getRoleCode())
+                || BUILTIN_SUPER_ROLE_CODE.equalsIgnoreCase(role.getRoleCode())) {
+            return getAllActivePermissionCodes();
+        }
+        return rolePermissionMapper.selectPermissionCodesByRoleId(roleId);
+    }
+
+    /**
+     * 查询全部启用权限编码（superAdmin 保留账号强制全量鉴权用）
+     */
+    public List<String> getAllActivePermissionCodes() {
+        return permissionMapper.selectAllActivePermissionCodes();
     }
 
     /**

@@ -20,6 +20,8 @@ import com.platform.common.exception.BusinessException;
 import com.platform.common.exception.ErrorCode;
 import com.platform.common.response.PageResponse;
 import com.platform.environment.service.EnvironmentService;
+import com.platform.knowledge.event.ProjectMaterialChangedEvent;
+import com.platform.knowledge.service.KnowledgeMaterialCollector;
 import com.platform.keyword.entity.ApiKeyword;
 import com.platform.keyword.entity.Keyword;
 import com.platform.keyword.mapper.ApiKeywordMapper;
@@ -31,6 +33,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -62,6 +65,7 @@ public class ApiService {
     private final ApiModuleService apiModuleService;
     private final ApiSyncConfigMapper apiSyncConfigMapper;
     private final ObjectMapper objectMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * 分页查询接口列表
@@ -117,6 +121,10 @@ public class ApiService {
         api.setRequestBody(sanitizeJson(api.getRequestBody()));
         api.setResponseBody(sanitizeJson(api.getResponseBody()));
         apiMapper.insert(api);
+
+        // 知识库同步：接口变更归入所属模块重新采集（采集粒度 = 1 模块 = 1 知识库文档）
+        publishModuleEvent(api.getProjectId(), api.getModuleId());
+
         Map<Long, ApiModule> moduleMap = apiModuleService.getModuleMap(api.getProjectId());
         return toResponse(api, moduleMap);
     }
@@ -126,6 +134,7 @@ public class ApiService {
      */
     public ApiInfoResponse update(Long apiId, ApiUpdateRequest request) {
         Api api = findById(apiId);
+        Long oldModuleId = api.getModuleId();
 
         if (request.getModuleId() != null) {
             api.setModuleId(request.getModuleId());
@@ -170,6 +179,13 @@ public class ApiService {
         api.setRequestBody(sanitizeJson(api.getRequestBody()));
         api.setResponseBody(sanitizeJson(api.getResponseBody()));
         apiMapper.updateById(api);
+
+        // 知识库同步：接口变更归入所属模块重新采集；模块移动时新旧模块均触发
+        publishModuleEvent(api.getProjectId(), api.getModuleId());
+        if (!Objects.equals(oldModuleId, api.getModuleId())) {
+            publishModuleEvent(api.getProjectId(), oldModuleId);
+        }
+
         Map<Long, ApiModule> moduleMap = apiModuleService.getModuleMap(api.getProjectId());
         return toResponse(api, moduleMap);
     }
@@ -187,7 +203,7 @@ public class ApiService {
      * 删除接口
      */
     public void delete(Long apiId) {
-        findById(apiId);
+        Api api = findById(apiId);
         // 删除保护检查 - 被 ApiKeyword 引用时不可删除
         LambdaQueryWrapper<ApiKeyword> kwWrapper = new LambdaQueryWrapper<>();
         kwWrapper.eq(ApiKeyword::getApiId, apiId);
@@ -197,6 +213,9 @@ public class ApiService {
                     "接口被 " + refCount + " 个关键字引用，无法删除");
         }
         apiMapper.deleteById(apiId);
+
+        // 知识库同步：接口删除归入所属模块重新采集
+        publishModuleEvent(api.getProjectId(), api.getModuleId());
     }
 
     /**
@@ -216,8 +235,15 @@ public class ApiService {
     public void batchMove(List<Long> apiIds, Long targetModuleId) {
         for (Long apiId : apiIds) {
             Api api = findById(apiId);
+            Long oldModuleId = api.getModuleId();
             api.setModuleId(targetModuleId);
             apiMapper.updateById(api);
+
+            // 知识库同步：接口移动，新旧模块均重新采集
+            publishModuleEvent(api.getProjectId(), targetModuleId);
+            if (!Objects.equals(oldModuleId, targetModuleId)) {
+                publishModuleEvent(api.getProjectId(), oldModuleId);
+            }
         }
     }
 
@@ -262,9 +288,23 @@ public class ApiService {
         for (ApiKeyword kw : apiKeywordMapper.selectList(kwWrapper)) {
             referencedIds.add(kw.getApiId());
         }
+        int deleted = 0;
         for (Api api : apis) {
             if (!referencedIds.contains(api.getId())) {
                 apiMapper.deleteById(api.getId());
+                deleted++;
+            }
+        }
+
+        // 知识库同步：按模块聚合发布（接口删除后所属模块重新采集）
+        if (deleted > 0) {
+            Long projectId = apis.get(0).getProjectId();
+            Set<Long> changedModuleIds = new HashSet<>();
+            for (Api api : apis) {
+                changedModuleIds.add(api.getModuleId());
+            }
+            for (Long moduleId : changedModuleIds) {
+                publishModuleEvent(projectId, moduleId);
             }
         }
     }
@@ -365,6 +405,10 @@ public class ApiService {
 
         SWAGGER_LOG.info("Swagger 导入结果: total={}, created={}, updated={}, skipped={}, moduleId={}",
                 entries.size(), created, updated, skipped, request.getModuleId());
+
+        // 知识库同步：Swagger 导入后该模块重新采集（syncFromUrl/syncOneConfig 复用此方法，自动覆盖）
+        publishModuleEvent(request.getProjectId(), request.getModuleId());
+
         return SwaggerImportResult.of(entries.size(), created, updated, skipped);
     }
 
@@ -912,6 +956,17 @@ public class ApiService {
     }
 
     // ───────────────────── 私有方法 ─────────────────────
+
+    /**
+     * 发布接口模块变更事件（接口级操作聚合到所属模块，由采集器按模块整体重采）
+     */
+    private void publishModuleEvent(Long projectId, Long moduleId) {
+        if (projectId == null || moduleId == null) {
+            return;
+        }
+        eventPublisher.publishEvent(new ProjectMaterialChangedEvent(
+                projectId, KnowledgeMaterialCollector.SOURCE_API_MODULE, moduleId));
+    }
 
     private Api findById(Long apiId) {
         Api api = apiMapper.selectById(apiId);

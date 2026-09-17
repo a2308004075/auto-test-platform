@@ -64,7 +64,7 @@ async function handleSaveProfile() {
   }
   try {
     const res: any = await updateProfile({
-      displayName: isAdminAccount.value ? undefined : profileForm.displayName,
+      displayName: profileForm.displayName,
       username: !isAdminAccount.value && profileForm.username !== userInfo.value.username ? profileForm.username : undefined,
       bio: profileForm.bio,
     })
@@ -177,19 +177,6 @@ function handleLogPageChange(p: number) {
   fetchLoginLogs()
 }
 
-// 头像首字母
-const avatarInitial = computed(() => {
-  const name = userInfo.value.displayName || userInfo.value.username || ''
-  return name ? name.charAt(0).toUpperCase() : 'U'
-})
-
-// 角色标签样式类
-const roleTagClass = computed(() => {
-  const r = (userInfo.value.role || '').toUpperCase()
-  if (r === 'SUPER_ADMIN') return 'role-tag-super-admin'
-  return r === 'ADMIN' ? 'role-tag-admin' : 'role-tag-tester'
-})
-
 onMounted(() => {
   fetchCurrentUser()
   fetchLoginLogs()
@@ -198,18 +185,6 @@ onMounted(() => {
 
 <template>
   <div class="profile-view" v-loading="profileLoading">
-    <!-- 头像 & 概览 -->
-    <div class="profile-avatar-section">
-      <div class="profile-avatar">{{ avatarInitial }}</div>
-      <div class="profile-avatar-info">
-        <h2>{{ userInfo.displayName || userInfo.username }}</h2>
-        <div class="meta-row">
-          <span class="meta-item">账号：{{ userInfo.username }}</span>
-          <el-tag v-if="userInfo.role" :class="roleTagClass" size="small" effect="plain">{{ userInfo.role }}</el-tag>
-        </div>
-      </div>
-    </div>
-
     <!-- 标签页 -->
     <el-tabs v-model="activeTab" class="profile-tabs">
       <!-- 基本信息 -->
@@ -221,10 +196,8 @@ onMounted(() => {
               <el-form-item label="用户名">
                 <el-input
                   v-model="profileForm.displayName"
-                  :disabled="isAdminAccount"
                   placeholder="请输入显示名称"
                 />
-                <div v-if="isAdminAccount" class="form-hint">系统内置管理员账号，用户名不可修改</div>
               </el-form-item>
               <el-form-item label="账号">
                 <el-input
@@ -331,51 +304,6 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* 头像 & 概览 */
-.profile-avatar-section {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  padding: 24px;
-  background: #fff;
-  border-radius: 6px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px rgba(0, 0, 0, 0.02);
-  margin-bottom: 16px;
-}
-.profile-avatar {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #409eff 0%, #337ecc 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: 32px;
-  font-weight: 600;
-  flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.3);
-}
-.profile-avatar-info h2 {
-  font-size: 20px;
-  font-weight: 600;
-  color: rgba(0, 0, 0, 0.88);
-  margin: 0 0 4px;
-}
-.meta-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  font-size: 13px;
-  color: rgba(0, 0, 0, 0.45);
-  margin-top: 6px;
-}
-.meta-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
 /* 表单卡片 */
 .profile-form-card {
   background: #fff;
@@ -403,22 +331,6 @@ onMounted(() => {
 }
 .form-group-full :deep(.el-textarea__inner) {
   resize: vertical;
-}
-/* 角色标签 */
-.role-tag-super-admin {
-  background: rgba(207, 19, 34, 0.1) !important;
-  color: #cf1322 !important;
-  border-color: rgba(207, 19, 34, 0.2) !important;
-}
-.role-tag-admin {
-  background: rgba(114, 46, 209, 0.1) !important;
-  color: #722ed1 !important;
-  border-color: rgba(114, 46, 209, 0.2) !important;
-}
-.role-tag-tester {
-  background: rgba(64, 158, 255, 0.1) !important;
-  color: #409eff !important;
-  border-color: rgba(64, 158, 255, 0.2) !important;
 }
 .form-hint {
   font-size: 12px;

@@ -9,15 +9,18 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.platform.auth.entity.User;
 import com.platform.auth.mapper.UserMapper;
+import com.platform.common.constant.BizType;
 import com.platform.common.exception.BusinessException;
 import com.platform.common.exception.ErrorCode;
 import com.platform.common.response.PageResponse;
+import com.platform.common.service.CommentService;
 import com.platform.environment.entity.Environment;
 import com.platform.environment.mapper.EnvironmentMapper;
 import com.platform.execution.dto.*;
 import com.platform.execution.entity.*;
 import com.platform.execution.mapper.*;
 import com.platform.project.service.ProjectService;
+import com.platform.sys.service.CustomFieldValueService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
@@ -55,8 +58,11 @@ public class DefectService {
     private final UserMapper userMapper;
     private final ProjectService projectService;
     private final EnvironmentMapper environmentMapper;
+    private final CustomFieldValueService customFieldValueService;
+    private final CommentService commentService;
 
-    private static final Set<String> VALID_STATUSES = new HashSet<>(Arrays.asList("NEW", "PENDING", "COMPLETED", "REOPENED", "CLOSED"));
+    private static final Set<String> VALID_STATUSES = new HashSet<>(Arrays.asList(
+            "NEW", "TO_CONFIRM", "FIXING", "TO_DEPLOY", "PENDING", "COMPLETED", "REOPENED", "DEFERRED", "CLOSED"));
     private static final Set<String> HISTORY_FIELDS = new HashSet<>(Arrays.asList(
             "title", "content", "assigneeId", "dueDate", "foundVersion", "moduleName",
             "severity", "source", "environmentId", "reasonDescription", "responsibleId",
@@ -112,7 +118,8 @@ public class DefectService {
     public List<DefectResponse> listAssignedDefects(Long userId) {
         LambdaQueryWrapper<Defect> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Defect::getAssigneeId, userId)
-                .in(Defect::getStatus, Arrays.asList("NEW", "PENDING", "REOPENED"))
+                // 未完成状态 = 除 已修复(COMPLETED)/无需修复(CLOSED) 外的全部状态
+                .notIn(Defect::getStatus, Arrays.asList("COMPLETED", "CLOSED"))
                 .orderByDesc(Defect::getCreatedAt);
         List<Defect> list = defectMapper.selectList(wrapper);
         return list.stream().map(this::toListResponse).collect(Collectors.toList());
@@ -129,6 +136,8 @@ public class DefectService {
         resp.setAttachments(loadAttachments(defectId));
         resp.setHistories(loadHistories(defectId));
         resp.setChildren(loadChildren(defectId));
+        // 自定义字段值（由【字段管理】动态配置驱动）
+        resp.setCustomFields(customFieldValueService.loadValues(defect.getProjectId(), "defect", defectId));
         return resp;
     }
 
@@ -161,6 +170,8 @@ public class DefectService {
 
         // 记录创建历史
         saveHistory(defect.getId(), "status", null, "NEW");
+        // 保存自定义字段值（由【字段管理】动态配置驱动）
+        customFieldValueService.saveValues(projectId, "defect", "create", defect.getId(), request.getCustomFields());
         return toDetailResponse(defect);
     }
 
@@ -178,6 +189,9 @@ public class DefectService {
 
         Map<String, String> newValues = captureSnapshot(defect);
         saveHistories(defect.getId(), oldValues, newValues);
+
+        // 保存自定义字段值（由【字段管理】动态配置驱动）
+        customFieldValueService.saveValues(defect.getProjectId(), "defect", "edit", defect.getId(), request.getCustomFields());
 
         return toDetailResponse(defect);
     }
@@ -526,6 +540,12 @@ public class DefectService {
         LambdaQueryWrapper<DefectHistory> w4 = new LambdaQueryWrapper<>();
         w4.eq(DefectHistory::getDefectId, defectId);
         defectHistoryMapper.delete(w4);
+
+        // 自定义字段值级联清理
+        customFieldValueService.deleteByEntity("defect", defectId);
+
+        // 通用评论级联清理（评论与变更记录模块：bizType=DEFECT）
+        commentService.deleteByBiz(BizType.DEFECT, defectId);
     }
 
     private List<DefectWorkLogResponse> loadWorkLogs(Long defectId) {

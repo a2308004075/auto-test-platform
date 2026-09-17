@@ -129,6 +129,35 @@
             <artifactId>jsoup</artifactId>
         </dependency>
 
+        <!-- Apache Tika（知识库：文档内容提取） -->
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-parsers</artifactId>
+        </dependency>
+
+        <!-- Apache PDFBox（知识库：PDF 解析） -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+        </dependency>
+
+        <!-- JAI ImageIO（知识库：PDF 内嵌 TIFF/JPEG2000 图片处理） -->
+        <dependency>
+            <groupId>com.github.jai-imageio</groupId>
+            <artifactId>jai-imageio-core</artifactId>
+        </dependency>
+
+
+        <!-- JavaParser（M17 AI 白盒测试：Java 源码 AST 解析） -->
+        <dependency>
+            <groupId>com.github.javaparser</groupId>
+            <artifactId>javaparser-core</artifactId>
+        </dependency>
+
         <!-- Lombok -->
         <dependency>
             <groupId>org.projectlombok</groupId>

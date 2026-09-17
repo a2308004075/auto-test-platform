@@ -68,6 +68,15 @@ export const componentMap: Record<string, () => Promise<any>> = {
   'defect/DefectEdit': () => import('@/views/defect/DefectEdit.vue'),
   'defect/DefectDetail': () => import('@/views/defect/DefectDetail.vue'),
 
+  // ===== AI 渗透测试模块 =====
+  'ai/AiPenTest': () => import('@/views/ai/AiPenTest.vue'),
+
+  // ===== AI 白盒测试模块 =====
+  'ai/AiWhitebox': () => import('@/views/ai/AiWhitebox.vue'),
+
+  // ===== 知识库模块 =====
+  'knowledge/KnowledgeChat': () => import('@/views/knowledge/KnowledgeChat.vue'),
+
   // ===== 测试计划/执行模块 =====
   'execution/PlanList': () => import('@/views/execution/PlanList.vue'),
   'execution/PlanEdit': () => import('@/views/execution/PlanEdit.vue'),
@@ -81,8 +90,7 @@ export const componentMap: Record<string, () => Promise<any>> = {
   'settings/RoleManagementView': () => import('@/views/settings/RoleManagementView.vue'),
   'settings/GlobalConfigView': () => import('@/views/settings/GlobalConfigView.vue'),
   'settings/MenuManagementView': () => import('@/views/settings/MenuManagementView.vue'),
-  'settings/DictManagementView': () => import('@/views/settings/DictManagementView.vue'),
-  'settings/CacheManagementView': () => import('@/views/settings/CacheManagementView.vue'),
+  'settings/CustomFieldView': () => import('@/views/settings/CustomFieldView.vue'),
 }
 
 /**

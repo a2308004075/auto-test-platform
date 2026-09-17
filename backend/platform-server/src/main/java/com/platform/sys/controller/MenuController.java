@@ -9,17 +9,15 @@ import com.platform.auth.entity.User;
 import com.platform.auth.service.RoleService;
 import com.platform.common.response.ApiResponse;
 import com.platform.sys.dto.MenuCreateRequest;
-import com.platform.sys.dto.MenuImportResult;
 import com.platform.sys.dto.MenuListItem;
+import com.platform.sys.dto.MenuSortItem;
 import com.platform.sys.dto.MenuTreeNode;
 import com.platform.sys.service.MenuService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 
-import javax.servlet.http.HttpServletResponse;
 import javax.validation.Valid;
 import java.util.Collections;
 import java.util.List;
@@ -79,15 +77,6 @@ public class MenuController {
     }
 
     /**
-     * 新增菜单
-     */
-    @PostMapping
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
-    public ApiResponse<MenuListItem> add(@Valid @RequestBody MenuCreateRequest request) {
-        return ApiResponse.ok(menuService.add(request));
-    }
-
-    /**
      * 更新菜单
      */
     @PostMapping("/{id}")
@@ -108,6 +97,16 @@ public class MenuController {
     }
 
     /**
+     * 批量更新菜单层级与顺序（菜单管理编辑模式拖拽保存）
+     */
+    @PostMapping("/sort")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
+    public ApiResponse<Void> sort(@RequestBody List<MenuSortItem> items) {
+        menuService.batchUpdateSort(items);
+        return ApiResponse.ok(null);
+    }
+
+    /**
      * 切换菜单启用/停用状态
      */
     @PostMapping("/{id}/toggle")
@@ -115,23 +114,5 @@ public class MenuController {
     public ApiResponse<Void> toggleStatus(@PathVariable Long id) {
         menuService.toggleStatus(id);
         return ApiResponse.ok(null);
-    }
-
-    /**
-     * 导出菜单列表到 Excel（仅 ADMIN）
-     */
-    @GetMapping("/export")
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
-    public void export(HttpServletResponse response) {
-        menuService.exportMenus(response);
-    }
-
-    /**
-     * 从 Excel 导入菜单（仅 ADMIN）
-     */
-    @PostMapping("/import")
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
-    public ApiResponse<MenuImportResult> importMenus(@RequestParam("file") MultipartFile file) {
-        return ApiResponse.ok(menuService.importMenus(file));
     }
 }
