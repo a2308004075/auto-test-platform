@@ -12,7 +12,7 @@ import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  getDefects, deleteDefect, transitionDefectStatus,
+  getDefects, deleteDefect,
   getDefectGroups, createDefectGroup, updateDefectGroup,
   deleteDefectGroup, clearDefectGroupDefects, clearDefectProjectDefects
 } from '@/api/defect'
@@ -243,19 +243,6 @@ function handleView(record: any) {
   router.push(`/project/${projectId.value}/defects/${record.id}`)
 }
 
-async function handleTransition(record: any, targetStatus: string) {
-  try {
-    await transitionDefectStatus(projectId.value, record.id, { targetStatus })
-    ElMessage.success('状态更新成功')
-    fetchList()
-  } catch { ElMessage.error('操作失败') }
-}
-
-/** 流转目标 = 除当前状态外的全部状态（宽松白名单） */
-function transitionTargets(current: string) {
-  return statusOptions.value.filter((o) => o.value !== current)
-}
-
 function handleDelete(record: any) {
   ElMessageBox.confirm(`确定删除缺陷「${record.defectNo}」？`, '确认删除', { type: 'warning' })
     .then(async () => { await deleteDefect(projectId.value, record.id); ElMessage.success('删除成功'); fetchGroups(); fetchList() })
@@ -411,14 +398,6 @@ onBeforeUnmount(() => {
           <el-table-column label="操作" width="170" fixed="right">
             <template #default="{ row }">
               <el-button type="primary" link size="small" @click="handleView(row)">详情</el-button>
-              <el-dropdown size="small" @command="(cmd: string) => handleTransition(row, cmd)">
-                <el-button type="primary" link size="small">流转<el-icon class="el-icon--right"><arrow-down /></el-icon></el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item v-for="s in transitionTargets(row.status)" :key="s.value" :command="s.value">{{ s.label }}</el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
               <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
             </template>
           </el-table-column>
