@@ -142,6 +142,7 @@ public final class ErrorCode {
 
     // ===== 系统管理 (2100-2199) =====
     public static final int MENU_NOT_FOUND = 2100;
+    public static final int CACHE_KEY_NOT_FOUND = 2102;
     public static final int CUSTOM_FIELD_NOT_FOUND = 2103;
     public static final int CUSTOM_FIELD_KEY_DUPLICATE = 2104;
 
@@ -237,6 +238,7 @@ public final class ErrorCode {
             case KEYWORD_GROUP_NOT_FOUND:
             case ROLE_NOT_FOUND:
             case MENU_NOT_FOUND:
+            case CACHE_KEY_NOT_FOUND:
             case CUSTOM_FIELD_NOT_FOUND:
             case REPOSITORY_NOT_FOUND:
             case REPOSITORY_GROUP_NOT_FOUND:
