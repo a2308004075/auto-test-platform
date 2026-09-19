@@ -65,16 +65,6 @@ export function clearDefectProjectDefects(projectId: number) {
   return request.post(`/v1/projects/${projectId}/defect-groups/clear-all-defects`)
 }
 
-// ===== 工时 API =====
-
-export function addDefectWorkLog(projectId: number, defectId: number, data: any) {
-  return request.post(`/v1/projects/${projectId}/defects/${defectId}/work-logs`, data)
-}
-
-export function deleteDefectWorkLog(projectId: number, defectId: number, workLogId: number) {
-  return request.post(`/v1/projects/${projectId}/defects/${defectId}/work-logs/${workLogId}/delete`)
-}
-
 // ===== 关联 API =====
 
 export function addDefectRelation(projectId: number, defectId: number, data: any) {

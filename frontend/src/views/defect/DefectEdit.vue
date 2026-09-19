@@ -35,9 +35,6 @@ const form = reactive({
   groupId: null as number | null,
   title: '',
   content: '',
-  estimatedHours: 0,
-  actualHours: 0,
-  remainingHours: 0,
 })
 
 const userGroups = computed(() => groups.value.filter((g) => g.isSystem !== 1))

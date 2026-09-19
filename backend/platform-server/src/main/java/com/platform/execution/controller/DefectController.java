@@ -97,29 +97,6 @@ public class DefectController {
         return ApiResponse.ok(defectService.listAssignedDefects(userId));
     }
 
-    // ───────────── 工时 ─────────────
-
-    /**
-     * 添加工时
-     */
-    @PostMapping("/{defectId}/work-logs")
-    public ApiResponse<DefectWorkLogResponse> addWorkLog(@PathVariable Long projectId,
-                                                          @PathVariable Long defectId,
-                                                          @Valid @RequestBody DefectWorkLogRequest request) {
-        return ApiResponse.ok(defectService.addWorkLog(defectId, request));
-    }
-
-    /**
-     * 删除工时
-     */
-    @PostMapping("/{defectId}/work-logs/{workLogId}/delete")
-    public ApiResponse<Void> deleteWorkLog(@PathVariable Long projectId,
-                                            @PathVariable Long defectId,
-                                            @PathVariable Long workLogId) {
-        defectService.deleteWorkLog(defectId, workLogId);
-        return ApiResponse.ok();
-    }
-
     // ───────────── 关联 ─────────────
 
     /**

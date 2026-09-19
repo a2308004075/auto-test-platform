@@ -8,7 +8,6 @@ package com.platform.execution.dto;
 import lombok.Data;
 
 import java.io.Serializable;
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -52,13 +51,6 @@ public class DefectResponse implements Serializable {
     private LocalDate planTestDate;
     private String status;
 
-    private Long parentId;
-    private String parentDefectNo;
-
-    private BigDecimal estimatedHours;
-    private BigDecimal actualHours;
-    private BigDecimal remainingHours;
-
     private Long createdBy;
     private String createdByName;
     private Long updatedBy;
@@ -70,16 +62,6 @@ public class DefectResponse implements Serializable {
      * 自定义字段值（fieldKey -> 值；详情接口返回，由【字段管理】动态配置驱动）
      */
     private Map<String, String> customFields;
-
-    /**
-     * 子缺陷列表
-     */
-    private List<DefectResponse> children;
-
-    /**
-     * 工时记录
-     */
-    private List<DefectWorkLogResponse> workLogs;
 
     /**
      * 关联记录

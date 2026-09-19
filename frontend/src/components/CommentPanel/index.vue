@@ -108,26 +108,6 @@ watch(() => props.bizId, fetchComments, { immediate: true })
 
 <template>
   <div v-loading="loading" class="comment-panel">
-    <div class="comment-input-area">
-      <div v-if="replyTarget" class="reply-hint">
-        回复 <strong>{{ replyTarget.createdByName || '匿名用户' }}</strong>
-        <el-button type="primary" link size="small" @click="cancelReply">取消回复</el-button>
-      </div>
-      <el-input
-        v-model="commentText"
-        type="textarea"
-        :rows="3"
-        :placeholder="replyTarget ? '请输入回复内容' : '发表评论...'"
-        maxlength="2000"
-        show-word-limit
-      />
-      <div class="comment-submit">
-        <el-button type="primary" :loading="submitting" @click="handleSubmit">
-          {{ replyTarget ? '回复' : '评论' }}
-        </el-button>
-      </div>
-    </div>
-
     <div class="comment-list">
       <div v-for="item in comments" :key="item.id" class="comment-item">
         <div class="comment-header">
@@ -157,6 +137,26 @@ watch(() => props.bizId, fetchComments, { immediate: true })
 
       <el-empty v-if="!loading && comments.length === 0" description="暂无评论" />
     </div>
+
+    <div class="comment-input-area">
+      <div v-if="replyTarget" class="reply-hint">
+        回复 <strong>{{ replyTarget.createdByName || '匿名用户' }}</strong>
+        <el-button type="primary" link size="small" @click="cancelReply">取消回复</el-button>
+      </div>
+      <el-input
+        v-model="commentText"
+        type="textarea"
+        :rows="3"
+        :placeholder="replyTarget ? '请输入回复内容' : '发表评论...'"
+        maxlength="2000"
+        show-word-limit
+      />
+      <div class="comment-submit">
+        <el-button type="primary" :loading="submitting" @click="handleSubmit">
+          {{ replyTarget ? '回复' : '评论' }}
+        </el-button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -165,7 +165,7 @@ watch(() => props.bizId, fetchComments, { immediate: true })
   padding: 4px 0;
 }
 .comment-input-area {
-  margin-bottom: 16px;
+  margin-top: 16px;
 }
 .reply-hint {
   margin-bottom: 8px;

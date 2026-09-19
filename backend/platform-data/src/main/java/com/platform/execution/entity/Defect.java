@@ -11,7 +11,6 @@ import com.platform.common.entity.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
 
 /**
@@ -113,26 +112,6 @@ public class Defect extends BaseEntity {
      * 状态：NEW-新建/TO_CONFIRM-待确认/FIXING-修复中/TO_DEPLOY-待部署/PENDING-待验证/COMPLETED-已修复/REOPENED-重新打开/DEFERRED-延期修复/CLOSED-无需修复
      */
     private String status;
-
-    /**
-     * 父缺陷 ID（层级关系）
-     */
-    private Long parentId;
-
-    /**
-     * 总估算工时
-     */
-    private BigDecimal estimatedHours;
-
-    /**
-     * 总实际工时
-     */
-    private BigDecimal actualHours;
-
-    /**
-     * 总剩余工时
-     */
-    private BigDecimal remainingHours;
 
     /**
      * 创建人 ID

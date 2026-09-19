@@ -6,15 +6,16 @@
 <script setup lang="ts">
 /**
  * 缺陷详情（内置查看/编辑模式）
- * 查看态：标签页展示 内容、字段、工时、层级、关联、附件、变更记录
- * 编辑态：页头编号右侧编辑标题，内容 Tab（富文本）、字段 Tab（所属分组+动态字段+汇总工时）可编辑，保存后停留本页
+ * 内容（富文本）：进入编辑模式后修改（取消/保存在内容模块标题行）
+ * 缺陷标题：任意模式下点击标题即行内编辑，失焦自动保存
+ * 字段信息：无需编辑模式，直接编辑、变更即保存
+ * 附件 / 关联：无需编辑模式，直接操作
  */
-import { ref, reactive, onMounted, computed, watch, shallowRef } from 'vue'
+import { ref, reactive, onMounted, computed, watch, shallowRef, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getDefect, updateDefect, deleteDefect, transitionDefectStatus,
-  addDefectWorkLog, deleteDefectWorkLog,
   addDefectRelation, deleteDefectRelation,
   addDefectAttachment, deleteDefectAttachment, getDefectGroups
 } from '@/api/defect'
@@ -48,6 +49,9 @@ const targetTypeLabelMap = computed(() => {
 
 const loading = ref(false)
 const detail = ref<any>({})
+// 标题行内编辑（任意模式下可编辑，失焦自动保存）
+const titleEditing = ref(false)
+const titleInputRef = ref()
 // 右侧面板 Tab：评论 / 变更记录
 const sideTab = ref('comments')
 
@@ -59,19 +63,11 @@ const userGroups = computed(() => groups.value.filter((g) => g.isSystem !== 1))
 const form = reactive({
   title: '',
   content: '',
-  groupId: null as number | null,
-  estimatedHours: 0,
-  actualHours: 0,
-  remainingHours: 0,
 })
-// 编辑态动态字段值（fieldKey -> 值）
+// 动态字段值（fieldKey -> 值）：详情加载与每次保存后同步自后端
 const fieldValues = ref<Record<string, any>>({})
 // 编辑态动态字段配置（【字段管理】中【缺陷-编辑缺陷】视图）
 const editFields = ref<any[]>([])
-
-// 工时
-const workLogForm = reactive({ logDate: '', hours: 0, workType: 'ACTUAL', description: '' })
-const workLogVisible = ref(false)
 
 // 关联
 const relationForm = reactive({ relationType: 'RELATED', targetType: 'AUTO_CASE', targetId: undefined as number | undefined, targetTitle: '' })
@@ -97,14 +93,30 @@ const attachmentVisible = ref(false)
 
 // WangEditor（查看态只读；defaultConfig 仅创建时生效，切换编辑态用 enable/disable）
 const editorRef = shallowRef<any>(null)
+// 内容全屏状态（全屏时「退出全屏」按钮浮动于编辑器上方）
+const isFullscreen = ref(false)
 const editorConfig = {
   readOnly: true,
+  // Toolbar 组件直接以本对象为工具栏配置（读取顶层 excludeKeys）：全屏按钮已移至「内容」标题旁，工具栏不再内置
+  excludeKeys: ['fullScreen'],
   MENU_CONF: {
     uploadImage: { disabled: true },
     uploadVideo: { disabled: true },
   },
 }
-function onEditorCreated(editor: any) { editorRef.value = editor }
+function onEditorCreated(editor: any) {
+  editorRef.value = editor
+  editor.on('fullScreen', () => { isFullscreen.value = true })
+  editor.on('unFullScreen', () => { isFullscreen.value = false })
+}
+
+/** 切换内容编辑器全屏（入口为「内容」标题旁按钮） */
+function toggleFullscreen() {
+  const editor = editorRef.value
+  if (!editor) return
+  if (isFullscreen.value) editor.unFullScreen()
+  else editor.fullScreen()
+}
 
 // 编辑器内容绑定：查看态展示详情内容，编辑态读写表单内容
 const contentModel = computed({
@@ -136,37 +148,6 @@ const statusLabelMap = computed(() => {
   statusOptions.value.forEach((o) => { map[o.value] = o.label })
   return map
 })
-
-// 动态字段（【字段管理】中【缺陷】create/edit 视图字段配置，按 fieldKey 去重合并）
-const customFields = ref<any[]>([])
-
-async function fetchCustomFields() {
-  try {
-    const [createRes, editRes]: any[] = await Promise.all([
-      getCustomFieldsForRender({ projectId: projectId.value, module: 'defect', viewType: 'create' }),
-      getCustomFieldsForRender({ projectId: projectId.value, module: 'defect', viewType: 'edit' }),
-    ])
-    const createFields = createRes.data || []
-    const editOnlyFields = (editRes.data || []).filter(
-      (f: any) => !createFields.some((c: any) => c.fieldKey === f.fieldKey)
-    )
-    customFields.value = [...createFields, ...editOnlyFields]
-  } catch {
-    customFields.value = []
-  }
-}
-
-// 展示值：选项类字段（select/user/environment）将 value 映射为 label
-const OPTION_FIELD_TYPES = ['select', 'user', 'environment']
-function displayFieldValue(field: any): string {
-  const value = detail.value.customFields?.[field.fieldKey]
-  if (value === undefined || value === null || value === '') return '-'
-  if (OPTION_FIELD_TYPES.includes(field.fieldType) && Array.isArray(field.options)) {
-    const opt = field.options.find((o: any) => String(o.value) === String(value))
-    if (opt) return opt.label
-  }
-  return String(value)
-}
 
 // ===== 变更记录展示（中文字段名 + 旧值 → 新值） =====
 /** 变更记录字段名 → 中文标签（未收录字段显示原文） */
@@ -228,6 +209,7 @@ async function fetchDetail() {
   try {
     const res: any = await getDefect(projectId.value, defectId.value)
     detail.value = res.data || {}
+    fieldValues.value = { ...(detail.value.customFields || {}) }
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.message || '加载缺陷详情失败')
   } finally {
@@ -254,23 +236,43 @@ async function fetchEditFields() {
   } catch { editFields.value = [] }
 }
 
-/** 进入编辑态：以当前详情初始化表单与动态字段值 */
+/** 点击缺陷标题：进入行内编辑（任意模式下可编辑） */
+function startTitleEdit() {
+  if (!detail.value.id) return
+  form.title = detail.value.title || ''
+  titleEditing.value = true
+  nextTick(() => {
+    const input = titleInputRef.value as any
+    if (input) {
+      input.focus()
+      if (typeof input.select === 'function') input.select()
+    }
+  })
+}
+
+/** 标题失焦：退出编辑并自动保存（空标题回退原值） */
+async function handleTitleBlur() {
+  titleEditing.value = false
+  const title = form.title.trim()
+  if (!title) {
+    ElMessage.warning('缺陷标题不能为空')
+    return
+  }
+  if (title === (detail.value.title || '')) return
+  try {
+    await updateDefect(projectId.value, defectId.value, { title })
+    ElMessage.success('已保存')
+    await fetchDetail()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '保存失败')
+    await fetchDetail()
+  }
+}
+
+/** 进入编辑态：以当前详情初始化内容表单 */
 function startEdit() {
   if (!detail.value.id) { ElMessage.warning('缺陷加载中，请稍后再试'); return }
-  form.title = detail.value.title || ''
   form.content = detail.value.content || ''
-  form.groupId = detail.value.groupId ?? null
-  form.estimatedHours = detail.value.estimatedHours || 0
-  form.actualHours = detail.value.actualHours || 0
-  form.remainingHours = detail.value.remainingHours || 0
-
-  const values = { ...(detail.value.customFields || {}) }
-  for (const field of editFields.value) {
-    if (field.defaultValue !== null && field.defaultValue !== undefined && field.defaultValue !== '') {
-      if (values[field.fieldKey] === undefined) values[field.fieldKey] = field.defaultValue
-    }
-  }
-  fieldValues.value = values
   editing.value = true
 }
 
@@ -279,22 +281,12 @@ function handleCancelEdit() {
   editing.value = false
 }
 
-/** 保存编辑：提交后退出编辑态并刷新详情，停留在本页 */
+/** 保存编辑：仅提交内容，保存后退出编辑态并刷新详情，停留本页 */
 async function handleSave() {
-  if (!form.title.trim()) {
-    ElMessage.warning('请输入缺陷标题')
-    return
-  }
   saving.value = true
   try {
     await updateDefect(projectId.value, defectId.value, {
-      title: form.title,
       content: form.content,
-      groupId: form.groupId,
-      estimatedHours: form.estimatedHours,
-      actualHours: form.actualHours,
-      remainingHours: form.remainingHours,
-      customFields: { ...fieldValues.value },
     })
     ElMessage.success('更新成功')
     await fetchDetail()
@@ -306,19 +298,32 @@ async function handleSave() {
   }
 }
 
-// 自动计算总估算工时 = 计划完成修复时间 - 计划开始修复时间（小时，与旧编辑页一致）
-watch(
-  () => [fieldValues.value['defect_plan_start'], fieldValues.value['defect_plan_end']],
-  ([start, end]) => {
-    if (start && end) {
-      const ms = new Date(end).getTime() - new Date(start).getTime()
-      const hours = Math.round(ms / (1000 * 60 * 60))
-      form.estimatedHours = hours >= 0 ? hours : 0
-    } else {
-      form.estimatedHours = 0
-    }
-  },
-)
+/** 字段信息直接编辑：动态字段变更即保存 */
+async function handleFieldSave() {
+  const payload: any = { customFields: { ...fieldValues.value } }
+  try {
+    await updateDefect(projectId.value, defectId.value, payload)
+    ElMessage.success('已保存')
+    await fetchDetail()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '保存失败')
+    await fetchDetail()
+  }
+}
+
+/** 字段信息直接编辑：所属分组变更即保存 */
+async function handleGroupChange(val: number | string | undefined) {
+  const groupId = typeof val === 'number' ? val : null
+  if (groupId === (detail.value.groupId ?? null)) return
+  try {
+    await updateDefect(projectId.value, defectId.value, { groupId: groupId ?? undefined })
+    ElMessage.success('已保存')
+    await fetchDetail()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '保存失败')
+    await fetchDetail()
+  }
+}
 
 function handleDelete() {
   ElMessageBox.confirm(`确定删除缺陷「${detail.value.defectNo}」？`, '确认删除', { type: 'warning' })
@@ -331,41 +336,12 @@ function handleDelete() {
 }
 
 async function handleTransition(targetStatus: string) {
+  if (targetStatus === detail.value.status) return
   try {
     await transitionDefectStatus(projectId.value, defectId.value, { targetStatus })
     ElMessage.success('状态更新成功')
     fetchDetail()
   } catch { ElMessage.error('操作失败') }
-}
-
-/** 流转目标 = 除当前状态外的全部状态（宽松白名单） */
-function transitionTargets(current: string) {
-  return statusOptions.value.filter((o) => o.value !== current)
-}
-
-// 工时
-async function handleAddWorkLog() {
-  if (!workLogForm.hours) { ElMessage.warning('请输入工时'); return }
-  try {
-    await addDefectWorkLog(projectId.value, defectId.value, {
-      logDate: workLogForm.logDate || undefined,
-      hours: workLogForm.hours,
-      workType: workLogForm.workType,
-      description: workLogForm.description,
-    })
-    ElMessage.success('添加成功')
-    workLogVisible.value = false
-    Object.assign(workLogForm, { logDate: '', hours: 0, workType: 'ACTUAL', description: '' })
-    fetchDetail()
-  } catch (e: any) { ElMessage.error(e?.response?.data?.message || '添加失败') }
-}
-
-async function handleDeleteWorkLog(id: number) {
-  try {
-    await deleteDefectWorkLog(projectId.value, defectId.value, id)
-    ElMessage.success('删除成功')
-    fetchDetail()
-  } catch { ElMessage.error('删除失败') }
 }
 
 // 关联
@@ -421,7 +397,6 @@ function openFile(url: string) {
 
 onMounted(() => {
   fetchDetail()
-  fetchCustomFields()
   fetchGroups()
   fetchEditFields()
 })
@@ -433,28 +408,30 @@ onMounted(() => {
       <!-- 编号右侧：标题（查看态文本 / 编辑态输入框） -->
       <template #title-suffix>
         <el-input
-          v-if="editing"
+          v-if="titleEditing"
+          ref="titleInputRef"
           v-model="form.title"
           class="header-title-input"
           placeholder="请输入缺陷标题"
           maxlength="500"
+          @blur="handleTitleBlur"
+          @keyup.enter="handleTitleBlur"
         />
-        <span v-else class="header-title-text">{{ detail.title }}</span>
+        <span
+          v-else
+          class="header-title-text header-title-editable"
+          title="点击编辑标题"
+          @click="startTitleEdit"
+        >{{ detail.title }}</span>
       </template>
-      <template v-if="editing">
-        <el-button @click="handleCancelEdit">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
-      </template>
-      <template v-else>
-        <el-button type="primary" @click="startEdit">编辑</el-button>
-        <el-dropdown split-button type="primary" @command="handleTransition">
-          状态流转
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item v-for="s in transitionTargets(detail.status)" :key="s.value" :command="s.value">{{ s.label }}</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+      <template v-if="!editing">
+        <el-select
+          :model-value="detail.status"
+          style="width: 110px"
+          @change="(val: string) => handleTransition(val)"
+        >
+          <el-option v-for="s in statusOptions" :key="s.value" :value="s.value" :label="s.label" />
+        </el-select>
         <el-button type="danger" @click="handleDelete">删除</el-button>
       </template>
     </PageHeader>
@@ -471,11 +448,29 @@ onMounted(() => {
             </div>
           </div>
 
-          <!-- 内容（编辑态可编辑；标题在页头编号右侧编辑） -->
+          <!-- 内容（编辑态可编辑，编辑/取消/保存在本模块标题行；标题在页头编号右侧编辑） -->
           <div class="detail-block">
-            <div class="block-title">内容</div>
+            <div class="block-title">
+              <span class="block-title-left">
+                <span>内容</span>
+                <el-button
+                  class="fullscreen-btn"
+                  :class="{ 'is-floating': isFullscreen }"
+                  size="small"
+                  @click="toggleFullscreen"
+                >{{ isFullscreen ? '退出全屏' : '全屏' }}</el-button>
+              </span>
+              <div class="detail-actions">
+                <template v-if="editing">
+                  <el-button @click="handleCancelEdit">取消</el-button>
+                  <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
+                </template>
+                <el-button v-else type="primary" @click="startEdit">编辑</el-button>
+              </div>
+            </div>
             <div class="editor-wrapper">
-              <Toolbar :editor="editorRef" :default-config="editorConfig" mode="default" style="border-bottom: 1px solid #ccc" />
+              <!-- 工具栏仅编辑模式显示；v-show 保持 DOM 以兼容全屏（工具栏与编辑区需同父级） -->
+              <Toolbar v-show="editing" :editor="editorRef" :default-config="editorConfig" mode="default" style="border-bottom: 1px solid #ccc" />
               <Editor v-model="contentModel" :default-config="editorConfig" mode="default" style="height: 400px; overflow-y: hidden" @on-created="onEditorCreated" />
             </div>
           </div>
@@ -499,80 +494,32 @@ onMounted(() => {
             </el-table>
           </div>
 
-          <!-- 字段信息（查看态只读；编辑态：所属分组 + 动态字段） -->
+          <!-- 字段信息（直接编辑、变更即保存：所属分组 + 动态字段） -->
           <div class="detail-block">
             <div class="block-title">字段信息</div>
-            <div v-if="!editing" class="field-grid">
-              <div v-for="f in customFields" :key="f.id" class="field-item">
-                <span class="field-label">{{ f.fieldLabel }}：</span><span>{{ displayFieldValue(f) }}</span>
-              </div>
-              <div class="field-item"><span class="field-label">重新打开次数：</span><span>{{ detail.reopenCount ?? 0 }}</span></div>
-            </div>
-
-            <el-form v-else label-position="top" :model="form">
+            <el-form label-position="top">
               <DynamicFieldGrid
                 v-if="editFields.length > 0"
                 :fields="editFields"
                 :model-value="fieldValues"
                 @update:model-value="fieldValues = $event"
+                @field-change="handleFieldSave"
               >
                 <template #prepend>
                   <el-form-item label="所属分组">
-                    <el-select v-model="form.groupId" placeholder="未分组" clearable filterable style="width: 100%">
+                    <el-select :model-value="detail.groupId ?? null" placeholder="未分组" clearable filterable style="width: 100%" @change="handleGroupChange">
                       <el-option v-for="g in userGroups" :key="g.id" :value="g.id" :label="g.name" />
                     </el-select>
                   </el-form-item>
                 </template>
               </DynamicFieldGrid>
               <el-form-item v-else label="所属分组">
-                <el-select v-model="form.groupId" placeholder="未分组" clearable filterable style="width: 100%">
+                <el-select :model-value="detail.groupId ?? null" placeholder="未分组" clearable filterable style="width: 100%" @change="handleGroupChange">
                   <el-option v-for="g in userGroups" :key="g.id" :value="g.id" :label="g.name" />
                 </el-select>
               </el-form-item>
             </el-form>
-          </div>
-
-          <!-- 汇总工时（编辑态可改实际/剩余，总估算自动计算） -->
-          <div class="detail-block">
-            <div class="block-title">汇总工时</div>
-            <div v-if="!editing" class="field-grid">
-              <div class="field-item"><span class="field-label">总估算工时：</span><span>{{ detail.estimatedHours ?? 0 }} 小时</span></div>
-              <div class="field-item"><span class="field-label">总实际工时：</span><span>{{ detail.actualHours ?? 0 }} 小时</span></div>
-              <div class="field-item"><span class="field-label">总剩余工时：</span><span>{{ detail.remainingHours ?? 0 }} 小时</span></div>
-            </div>
-            <el-form v-else label-position="top" :model="form">
-              <div class="form-row">
-                <el-form-item label="总估算工时（小时）" style="flex: 1; max-width: 260px">
-                  <el-input :model-value="form.estimatedHours" disabled style="width: 100%" />
-                </el-form-item>
-                <el-form-item label="总实际工时" style="flex: 1">
-                  <el-input-number v-model="form.actualHours" :min="0" :precision="2" style="width: 100%" />
-                </el-form-item>
-                <el-form-item label="总剩余工时" style="flex: 1">
-                  <el-input-number v-model="form.remainingHours" :min="0" :precision="2" style="width: 100%" />
-                </el-form-item>
-              </div>
-            </el-form>
-          </div>
-
-          <!-- 工时记录 -->
-          <div class="detail-block">
-            <div class="block-title">工时记录</div>
-            <div class="tab-toolbar">
-              <el-button type="primary" size="small" @click="workLogVisible = true">添加工时</el-button>
-            </div>
-            <el-table :data="detail.workLogs || []" border stripe>
-              <el-table-column prop="logDate" label="日期" width="120" />
-              <el-table-column prop="hours" label="工时（小时）" width="120" />
-              <el-table-column prop="workType" label="类型" width="120" />
-              <el-table-column prop="description" label="说明" />
-              <el-table-column prop="userName" label="记录人" width="120" />
-              <el-table-column label="操作" width="80">
-                <template #default="{ row }">
-                  <el-button type="danger" link size="small" @click="handleDeleteWorkLog(row.id)">删除</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
+            <div class="field-item"><span class="field-label">重新打开次数：</span><span>{{ detail.reopenCount ?? 0 }}</span></div>
           </div>
 
           <!-- 关联 -->
@@ -595,21 +542,6 @@ onMounted(() => {
                   <el-button type="danger" link size="small" @click="handleDeleteRelation(row.id)">删除</el-button>
                 </template>
               </el-table-column>
-            </el-table>
-          </div>
-
-          <!-- 层级（子缺陷） -->
-          <div class="detail-block">
-            <div class="block-title">层级</div>
-            <el-table :data="detail.children || []" border stripe>
-              <el-table-column prop="defectNo" label="缺陷编号" width="160" />
-              <el-table-column prop="title" label="标题" />
-              <el-table-column prop="status" label="状态" width="100">
-                <template #default="{ row }">
-                  <el-tag :type="(statusTypeMap[row.status] || 'info') as any" size="small">{{ statusLabelMap[row.status] || row.status }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="assigneeName" label="负责人" width="120" />
             </el-table>
           </div>
 
@@ -642,32 +574,6 @@ onMounted(() => {
         </el-tabs>
       </div>
     </div>
-
-    <!-- 添加工时弹窗 -->
-    <el-dialog v-model="workLogVisible" title="添加工时" width="460px">
-      <el-form label-position="top">
-        <el-form-item label="日期">
-          <el-date-picker v-model="workLogForm.logDate" type="date" placeholder="选择日期" style="width: 100%" value-format="YYYY-MM-DD" />
-        </el-form-item>
-        <el-form-item label="工时（小时）" required>
-          <el-input-number v-model="workLogForm.hours" :min="0" :precision="2" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="类型">
-          <el-select v-model="workLogForm.workType" style="width: 100%">
-            <el-option value="ACTUAL" label="实际工时" />
-            <el-option value="ESTIMATE" label="估算工时" />
-            <el-option value="REMAINING" label="剩余工时" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="说明">
-          <el-input v-model="workLogForm.description" type="textarea" :rows="3" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="workLogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleAddWorkLog">确定</el-button>
-      </template>
-    </el-dialog>
 
     <!-- 添加关联弹窗 -->
     <el-dialog v-model="relationVisible" title="添加关联" width="460px">
@@ -734,7 +640,7 @@ onMounted(() => {
 .detail-layout {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 16px;
 }
 .detail-main {
@@ -786,6 +692,21 @@ onMounted(() => {
   font-weight: 600;
   color: #303133;
   margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.block-title-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+/* 全屏时「退出全屏」按钮浮动于编辑器上方（全屏遮罩 z-index: 3001） */
+.fullscreen-btn.is-floating {
+  position: fixed;
+  top: 12px;
+  right: 20px;
+  z-index: 3002;
 }
 /* 页头编号右侧标题：查看态文本 */
 .header-title-text {
@@ -794,6 +715,13 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 页头标题：任意模式下点击即行内编辑 */
+.header-title-editable {
+  cursor: pointer;
+}
+.header-title-editable:hover {
+  color: #409eff;
 }
 /* 页头编号右侧标题：编辑态输入框 */
 .header-title-input {
@@ -806,6 +734,12 @@ onMounted(() => {
   gap: 12px;
   flex-wrap: wrap;
 }
+.detail-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .meta-item {
   font-size: 13px;
   color: #909399;
@@ -814,6 +748,11 @@ onMounted(() => {
   border: 1px solid #ccc;
   border-radius: 4px;
   overflow: hidden;
+}
+/* 全屏时仅编辑器覆盖视口；wangeditor 全屏类无 z-index，需高于页签栏(3000)避免其他元素浮入 */
+.editor-wrapper.w-e-full-screen-container {
+  z-index: 3001;
+  background: #fff;
 }
 .field-grid {
   display: grid;
@@ -836,13 +775,6 @@ onMounted(() => {
 }
 .tab-toolbar {
   margin-bottom: 12px;
-}
-.form-row {
-  display: flex;
-  gap: 16px;
-}
-.form-row > * {
-  min-width: 0;
 }
 .history-list {
   display: flex;

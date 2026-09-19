@@ -44,6 +44,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [value: Record<string, any>]
+  /** 字段值提交（el-input 失焦/回车、下拉选择、日期选择、数字变更时触发），供父组件即时保存 */
+  'field-change': [fieldKey: string]
 }>()
 
 /** 下拉类字段类型（选项统一来自 field.options） */
@@ -88,6 +90,7 @@ function updateFieldValue(fieldKey: string, val: any) {
         :model-value="modelValue[field.fieldKey] ?? ''"
         :placeholder="`请输入${field.fieldLabel}`"
         @update:model-value="updateFieldValue(field.fieldKey, $event)"
+        @change="emit('field-change', field.fieldKey)"
       />
 
       <!-- 多行文本（跨整行，3 行） -->
@@ -98,6 +101,7 @@ function updateFieldValue(fieldKey: string, val: any) {
         :model-value="modelValue[field.fieldKey] ?? ''"
         :placeholder="`请输入${field.fieldLabel}`"
         @update:model-value="updateFieldValue(field.fieldKey, $event)"
+        @change="emit('field-change', field.fieldKey)"
       />
 
       <!-- 下拉框（select 静态选项 / user 用户 / environment 环境） -->
@@ -109,6 +113,7 @@ function updateFieldValue(fieldKey: string, val: any) {
         filterable
         style="width: 100%"
         @update:model-value="updateFieldValue(field.fieldKey, $event)"
+        @change="emit('field-change', field.fieldKey)"
       >
         <el-option
           v-for="opt in parseOptions(field)"
@@ -127,6 +132,7 @@ function updateFieldValue(fieldKey: string, val: any) {
         value-format="YYYY-MM-DD HH:mm"
         style="width: 100%"
         @update:model-value="updateFieldValue(field.fieldKey, $event)"
+        @change="emit('field-change', field.fieldKey)"
       />
 
       <!-- 数字 -->
@@ -137,6 +143,7 @@ function updateFieldValue(fieldKey: string, val: any) {
         :controls="false"
         style="width: 100%"
         @update:model-value="updateFieldValue(field.fieldKey, $event)"
+        @change="emit('field-change', field.fieldKey)"
       />
     </el-form-item>
   </div>

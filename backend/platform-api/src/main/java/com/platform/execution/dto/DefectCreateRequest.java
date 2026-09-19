@@ -10,7 +10,6 @@ import lombok.Data;
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.Size;
 import java.io.Serializable;
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -55,14 +54,6 @@ public class DefectCreateRequest implements Serializable {
     private String fixedVersion;
 
     private LocalDate planTestDate;
-
-    private Long parentId;
-
-    private BigDecimal estimatedHours;
-
-    private BigDecimal actualHours;
-
-    private BigDecimal remainingHours;
 
     /**
      * 初始关联列表

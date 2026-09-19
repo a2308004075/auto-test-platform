@@ -30,8 +30,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -48,7 +46,6 @@ public class DefectService {
     private final DefectMapper defectMapper;
     private final DefectGroupMapper defectGroupMapper;
     private final DefectGroupService defectGroupService;
-    private final DefectWorkLogMapper defectWorkLogMapper;
     private final DefectRelationMapper defectRelationMapper;
     private final DefectAttachmentMapper defectAttachmentMapper;
     private final DefectHistoryMapper defectHistoryMapper;
@@ -66,8 +63,7 @@ public class DefectService {
     private static final Set<String> HISTORY_FIELDS = new HashSet<>(Arrays.asList(
             "title", "content", "assigneeId", "dueDate", "foundVersion", "moduleName",
             "severity", "source", "environmentId", "reasonDescription", "responsibleId",
-            "fixedVersion", "planTestDate", "status", "groupId", "parentId",
-            "estimatedHours", "actualHours", "remainingHours"));
+            "fixedVersion", "planTestDate", "status", "groupId"));
 
     /**
      * 分页查询缺陷
@@ -130,12 +126,10 @@ public class DefectService {
      */
     public DefectResponse getDefect(Long defectId) {
         Defect defect = findById(defectId);
-        DefectResponse resp = toDetailResponse(defect);
-        resp.setWorkLogs(loadWorkLogs(defectId));
+        DefectResponse resp = toListResponse(defect);
         resp.setRelations(loadRelations(defectId));
         resp.setAttachments(loadAttachments(defectId));
         resp.setHistories(loadHistories(defectId));
-        resp.setChildren(loadChildren(defectId));
         // 自定义字段值（由【字段管理】动态配置驱动）
         resp.setCustomFields(customFieldValueService.loadValues(defect.getProjectId(), "defect", defectId));
         return resp;
@@ -154,9 +148,6 @@ public class DefectService {
         defect.setDefectNo(generateDefectNo(projectId));
         defect.setStatus("NEW");
         defect.setReopenCount(0);
-        if (defect.getEstimatedHours() == null) defect.setEstimatedHours(BigDecimal.ZERO);
-        if (defect.getActualHours() == null) defect.setActualHours(BigDecimal.ZERO);
-        if (defect.getRemainingHours() == null) defect.setRemainingHours(BigDecimal.ZERO);
         defect.setCreatedBy(getCurrentUserId());
 
         defectMapper.insert(defect);
@@ -168,11 +159,9 @@ public class DefectService {
             }
         }
 
-        // 记录创建历史
-        saveHistory(defect.getId(), "status", null, "NEW");
         // 保存自定义字段值（由【字段管理】动态配置驱动）
         customFieldValueService.saveValues(projectId, "defect", "create", defect.getId(), request.getCustomFields());
-        return toDetailResponse(defect);
+        return toListResponse(defect);
     }
 
     /**
@@ -193,7 +182,7 @@ public class DefectService {
         // 保存自定义字段值（由【字段管理】动态配置驱动）
         customFieldValueService.saveValues(defect.getProjectId(), "defect", "edit", defect.getId(), request.getCustomFields());
 
-        return toDetailResponse(defect);
+        return toListResponse(defect);
     }
 
     /**
@@ -229,39 +218,7 @@ public class DefectService {
         if (StringUtils.hasText(request.getRemark())) {
             saveHistory(defectId, "remark", null, request.getRemark());
         }
-        return toDetailResponse(defect);
-    }
-
-    /**
-     * 添加工时记录
-     */
-    @Transactional(rollbackFor = Exception.class)
-    public DefectWorkLogResponse addWorkLog(Long defectId, DefectWorkLogRequest request) {
-        findById(defectId);
-        DefectWorkLog workLog = new DefectWorkLog();
-        workLog.setDefectId(defectId);
-        workLog.setUserId(getCurrentUserId());
-        workLog.setLogDate(request.getLogDate() != null ? request.getLogDate() : LocalDate.now());
-        workLog.setHours(request.getHours());
-        workLog.setWorkType(request.getWorkType());
-        workLog.setDescription(request.getDescription());
-        workLog.setCreatedAt(LocalDateTime.now());
-        defectWorkLogMapper.insert(workLog);
-
-        // 同步汇总工时
-        recalcWorkHours(defectId);
-
-        return toWorkLogResponse(workLog);
-    }
-
-    /**
-     * 删除工时记录
-     */
-    @Transactional(rollbackFor = Exception.class)
-    public void deleteWorkLog(Long defectId, Long workLogId) {
-        findById(defectId);
-        defectWorkLogMapper.deleteById(workLogId);
-        recalcWorkHours(defectId);
+        return toListResponse(defect);
     }
 
     /**
@@ -372,10 +329,6 @@ public class DefectService {
         if (request.getResponsibleId() != null) defect.setResponsibleId(request.getResponsibleId());
         if (request.getFixedVersion() != null) defect.setFixedVersion(request.getFixedVersion());
         if (request.getPlanTestDate() != null) defect.setPlanTestDate(request.getPlanTestDate());
-        if (request.getParentId() != null) defect.setParentId(request.getParentId());
-        if (request.getEstimatedHours() != null) defect.setEstimatedHours(request.getEstimatedHours());
-        if (request.getActualHours() != null) defect.setActualHours(request.getActualHours());
-        if (request.getRemainingHours() != null) defect.setRemainingHours(request.getRemainingHours());
     }
 
     private Map<String, String> captureSnapshot(Defect defect) {
@@ -395,10 +348,6 @@ public class DefectService {
         map.put("planTestDate", toString(defect.getPlanTestDate()));
         map.put("status", defect.getStatus());
         map.put("groupId", toString(defect.getGroupId()));
-        map.put("parentId", toString(defect.getParentId()));
-        map.put("estimatedHours", toString(defect.getEstimatedHours()));
-        map.put("actualHours", toString(defect.getActualHours()));
-        map.put("remainingHours", toString(defect.getRemainingHours()));
         return map;
     }
 
@@ -510,25 +459,7 @@ public class DefectService {
         return result;
     }
 
-    private void recalcWorkHours(Long defectId) {
-        LambdaQueryWrapper<DefectWorkLog> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(DefectWorkLog::getDefectId, defectId);
-        List<DefectWorkLog> logs = defectWorkLogMapper.selectList(wrapper);
-        BigDecimal actual = logs.stream()
-                .map(l -> l.getHours() == null ? BigDecimal.ZERO : l.getHours())
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        Defect defect = findById(defectId);
-        defect.setActualHours(actual);
-        if (defect.getEstimatedHours() == null) defect.setEstimatedHours(BigDecimal.ZERO);
-        if (defect.getRemainingHours() == null) defect.setRemainingHours(BigDecimal.ZERO);
-        defectMapper.updateById(defect);
-    }
-
     private void deleteDefectChildren(Long defectId) {
-        LambdaQueryWrapper<DefectWorkLog> w1 = new LambdaQueryWrapper<>();
-        w1.eq(DefectWorkLog::getDefectId, defectId);
-        defectWorkLogMapper.delete(w1);
-
         LambdaQueryWrapper<DefectRelation> w2 = new LambdaQueryWrapper<>();
         w2.eq(DefectRelation::getDefectId, defectId);
         defectRelationMapper.delete(w2);
@@ -546,13 +477,6 @@ public class DefectService {
 
         // 通用评论级联清理（评论与变更记录模块：bizType=DEFECT）
         commentService.deleteByBiz(BizType.DEFECT, defectId);
-    }
-
-    private List<DefectWorkLogResponse> loadWorkLogs(Long defectId) {
-        LambdaQueryWrapper<DefectWorkLog> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(DefectWorkLog::getDefectId, defectId).orderByDesc(DefectWorkLog::getCreatedAt);
-        return defectWorkLogMapper.selectList(wrapper).stream()
-                .map(this::toWorkLogResponse).collect(Collectors.toList());
     }
 
     private List<DefectRelationResponse> loadRelations(Long defectId) {
@@ -576,13 +500,6 @@ public class DefectService {
                 .map(this::toHistoryResponse).collect(Collectors.toList());
     }
 
-    private List<DefectResponse> loadChildren(Long defectId) {
-        LambdaQueryWrapper<Defect> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Defect::getParentId, defectId).orderByDesc(Defect::getCreatedAt);
-        return defectMapper.selectList(wrapper).stream()
-                .map(this::toListResponse).collect(Collectors.toList());
-    }
-
     private DefectResponse toListResponse(Defect defect) {
         DefectResponse resp = new DefectResponse();
         BeanUtils.copyProperties(defect, resp);
@@ -592,23 +509,6 @@ public class DefectService {
         resp.setUpdatedByName(getUserName(defect.getUpdatedBy()));
         resp.setEnvironmentName(getEnvironmentName(defect.getEnvironmentId()));
         resp.setGroupName(getGroupName(defect.getGroupId()));
-        if (defect.getParentId() != null) {
-            Defect parent = defectMapper.selectById(defect.getParentId());
-            resp.setParentDefectNo(parent != null ? parent.getDefectNo() : null);
-        }
-        return resp;
-    }
-
-    private DefectResponse toDetailResponse(Defect defect) {
-        DefectResponse resp = toListResponse(defect);
-        resp.setChildren(loadChildren(defect.getId()));
-        return resp;
-    }
-
-    private DefectWorkLogResponse toWorkLogResponse(DefectWorkLog log) {
-        DefectWorkLogResponse resp = new DefectWorkLogResponse();
-        BeanUtils.copyProperties(log, resp);
-        resp.setUserName(getUserName(log.getUserId()));
         return resp;
     }
 
