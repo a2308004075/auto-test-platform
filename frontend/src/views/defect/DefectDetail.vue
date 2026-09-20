@@ -163,13 +163,40 @@ const HISTORY_FIELD_LABELS: Record<string, string> = {
   status: '状态',
   groupId: '所属分组',
   parentId: '父缺陷',
+  attachment: '附件',
+  relation: '关联',
   estimatedHours: '总估算工时',
   actualHours: '总实际工时',
   remainingHours: '总剩余工时',
   remark: '备注',
 }
 
+/** 动态字段 key → 字段定义（变更记录值翻译用） */
+const customFieldMap = computed(() => {
+  const map: Record<string, any> = {}
+  editFields.value.forEach((f: any) => { map[f.fieldKey] = f })
+  return map
+})
+
+/** 动态字段 key → 中文名（变更记录展示用） */
+const customFieldLabelMap = computed(() => {
+  const map: Record<string, string> = {}
+  editFields.value.forEach((f: any) => { map[f.fieldKey] = f.fieldLabel })
+  return map
+})
+
+/** 解析动态字段选项：优先 field.options，回退 optionsJson（与 DynamicFieldGrid 逻辑一致） */
+function parseFieldOptions(field: any): any[] {
+  if (field?.options && field.options.length > 0) return field.options
+  if (!field?.optionsJson) return []
+  try { return JSON.parse(field.optionsJson) } catch { return [] }
+}
+
 function historyFieldLabel(fieldName: string): string {
+  if (fieldName.startsWith('customField:')) {
+    const key = fieldName.substring('customField:'.length)
+    return customFieldLabelMap.value[key] || key
+  }
   return HISTORY_FIELD_LABELS[fieldName] || fieldName
 }
 
@@ -185,9 +212,16 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-/** 变更记录值展示：状态/分组映射为名称，富文本内容去标签，空值显示「空」 */
+/** 变更记录值展示：状态/分组映射为名称，枚举型动态字段值翻译为选项 label，富文本内容去标签，空值显示「空」 */
 function historyValueText(fieldName: string, value: string | null | undefined): string {
   if (value === null || value === undefined || value === '') return '空'
+  if (fieldName.startsWith('customField:')) {
+    const key = fieldName.substring('customField:'.length)
+    const opt = parseFieldOptions(customFieldMap.value[key]).find(
+      (o: any) => String(o.value) === String(value)
+    )
+    return opt ? opt.label : value
+  }
   if (fieldName === 'status') return statusLabelMap.value[value] || value
   if (fieldName === 'groupId') return groupNameMap.value[value] || value
   if (fieldName === 'content') return stripHtml(value)

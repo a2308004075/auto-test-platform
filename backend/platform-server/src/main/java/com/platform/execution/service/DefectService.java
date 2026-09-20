@@ -179,8 +179,15 @@ public class DefectService {
         Map<String, String> newValues = captureSnapshot(defect);
         saveHistories(defect.getId(), oldValues, newValues);
 
-        // 保存自定义字段值（由【字段管理】动态配置驱动）
+        // 保存自定义字段值（由【字段管理】动态配置驱动），前后对比记录变更
+        Map<String, String> oldCustomValues = request.getCustomFields() != null
+                ? customFieldValueService.loadValues(defect.getProjectId(), "defect", defectId)
+                : null;
         customFieldValueService.saveValues(defect.getProjectId(), "defect", "edit", defect.getId(), request.getCustomFields());
+        if (oldCustomValues != null) {
+            saveCustomFieldHistories(defectId, oldCustomValues,
+                    customFieldValueService.loadValues(defect.getProjectId(), "defect", defectId));
+        }
 
         return toListResponse(defect);
     }
@@ -240,7 +247,11 @@ public class DefectService {
     @Transactional(rollbackFor = Exception.class)
     public void deleteRelation(Long defectId, Long relationId) {
         findById(defectId);
+        DefectRelation relation = defectRelationMapper.selectById(relationId);
         defectRelationMapper.deleteById(relationId);
+        if (relation != null) {
+            saveHistory(defectId, "relation", relation.getTargetTitle(), null);
+        }
     }
 
     /**
@@ -257,6 +268,7 @@ public class DefectService {
         attachment.setCreatedBy(getCurrentUserId());
         attachment.setCreatedAt(LocalDateTime.now());
         defectAttachmentMapper.insert(attachment);
+        saveHistory(defectId, "attachment", null, fileName);
         return toAttachmentResponse(attachment);
     }
 
@@ -266,7 +278,11 @@ public class DefectService {
     @Transactional(rollbackFor = Exception.class)
     public void deleteAttachment(Long defectId, Long attachmentId) {
         findById(defectId);
+        DefectAttachment attachment = defectAttachmentMapper.selectById(attachmentId);
         defectAttachmentMapper.deleteById(attachmentId);
+        if (attachment != null) {
+            saveHistory(defectId, "attachment", attachment.getFileName(), null);
+        }
     }
 
     /**
@@ -378,6 +394,20 @@ public class DefectService {
         }
     }
 
+    /** 动态字段变更记录：逐字段对比新旧值（空串与 null 视为相同），变化项写入变更记录 */
+    private void saveCustomFieldHistories(Long defectId, Map<String, String> oldValues, Map<String, String> newValues) {
+        Set<String> keys = new HashSet<>();
+        keys.addAll(oldValues.keySet());
+        keys.addAll(newValues.keySet());
+        for (String key : keys) {
+            String oldVal = StringUtils.hasText(oldValues.get(key)) ? oldValues.get(key) : null;
+            String newVal = StringUtils.hasText(newValues.get(key)) ? newValues.get(key) : null;
+            if (!Objects.equals(oldVal, newVal)) {
+                saveHistory(defectId, "customField:" + key, oldVal, newVal);
+            }
+        }
+    }
+
     private void saveHistory(Long defectId, String fieldName, String oldValue, String newValue) {
         DefectHistory history = new DefectHistory();
         history.setDefectId(defectId);
@@ -436,6 +466,7 @@ public class DefectService {
         relation.setCreatedBy(getCurrentUserId());
         relation.setCreatedAt(LocalDateTime.now());
         defectRelationMapper.insert(relation);
+        saveHistory(defectId, "relation", null, targetTitle);
         return relation;
     }
 
