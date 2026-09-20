@@ -131,18 +131,6 @@ watch(editing, (val) => {
   else editor.disable()
 })
 
-// 标签色为前端展示样式；状态名称统一取自字典（sys_dict: defect_status）
-const statusTypeMap: Record<string, string> = {
-  NEW: 'info',
-  TO_CONFIRM: 'warning',
-  FIXING: 'primary',
-  TO_DEPLOY: 'warning',
-  PENDING: 'warning',
-  COMPLETED: 'success',
-  REOPENED: 'danger',
-  DEFERRED: 'info',
-  CLOSED: 'info',
-}
 const statusLabelMap = computed(() => {
   const map: Record<string, string> = {}
   statusOptions.value.forEach((o) => { map[o.value] = o.label })
@@ -442,7 +430,6 @@ onMounted(() => {
         <div class="detail-card">
           <div class="detail-header">
             <div class="detail-meta">
-              <el-tag :type="(statusTypeMap[detail.status] || 'info') as any" size="small">{{ statusLabelMap[detail.status] || detail.status }}</el-tag>
               <span class="meta-item">创建人：{{ detail.createdByName || '-' }}</span>
               <span class="meta-item">创建时间：{{ detail.createdAt }}</span>
             </div>
@@ -704,6 +691,10 @@ onMounted(() => {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+/* 评论面板（CommentPanel）根元素 height:100% 需要父级高度链成立 */
+.side-tabs :deep(.el-tab-pane) {
+  height: 100%;
 }
 .side-tabs :deep(.el-tabs__header) {
   margin-bottom: 12px;

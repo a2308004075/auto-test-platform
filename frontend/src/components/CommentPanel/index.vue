@@ -162,9 +162,17 @@ watch(() => props.bizId, fetchComments, { immediate: true })
 
 <style scoped>
 .comment-panel {
+  display: flex;
+  flex-direction: column;
+  /* 父级（如缺陷详情右栏 tab 内容区）有确定高度时：列表占满剩余空间、输入区钉底；
+     父级高度 auto 时退化为普通块流，整体随外层滚动（兼容抽屉/编辑页等旧用法） */
+  height: 100%;
+  min-height: 0;
   padding: 4px 0;
 }
 .comment-input-area {
+  /* 固定在面板底部，不随列表滚动 */
+  flex-shrink: 0;
   margin-top: 16px;
 }
 .reply-hint {
@@ -178,9 +186,18 @@ watch(() => props.bizId, fetchComments, { immediate: true })
   margin-top: 8px;
 }
 .comment-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* 滚到边界时不再联动外层滚动 */
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+/* 无评论时「暂无评论」在列表区垂直居中，避免输入框钉底下的大片空白 */
+.comment-list .el-empty:only-child {
+  margin: auto;
 }
 .comment-item {
   padding: 12px;
