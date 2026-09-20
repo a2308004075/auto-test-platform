@@ -137,6 +137,13 @@ const statusLabelMap = computed(() => {
   return map
 })
 
+/** 新建（NEW）为初始状态：流转出去后不允许再切回，仅当前仍处于新建时保留该选项 */
+const selectableStatusOptions = computed(() =>
+  detail.value.status === 'NEW'
+    ? statusOptions.value
+    : statusOptions.value.filter((s: any) => s.value !== 'NEW')
+)
+
 // ===== 变更记录展示（中文字段名 + 旧值 → 新值） =====
 /** 变更记录字段名 → 中文标签（未收录字段显示原文） */
 const HISTORY_FIELD_LABELS: Record<string, string> = {
@@ -413,13 +420,6 @@ onMounted(() => {
         >{{ detail.title }}</span>
       </template>
       <template v-if="!editing">
-        <el-select
-          :model-value="detail.status"
-          style="width: 110px"
-          @change="(val: string) => handleTransition(val)"
-        >
-          <el-option v-for="s in statusOptions" :key="s.value" :value="s.value" :label="s.label" />
-        </el-select>
         <el-button type="danger" @click="handleDelete">删除</el-button>
       </template>
     </PageHeader>
@@ -432,6 +432,15 @@ onMounted(() => {
             <div class="detail-meta">
               <span class="meta-item">创建人：{{ detail.createdByName || '-' }}</span>
               <span class="meta-item">创建时间：{{ detail.createdAt }}</span>
+              <el-select
+                v-if="!editing"
+                class="meta-status"
+                :model-value="detail.status"
+                style="width: 110px"
+                @change="(val: string) => handleTransition(val)"
+              >
+                <el-option v-for="s in selectableStatusOptions" :key="s.value" :value="s.value" :label="s.label" />
+              </el-select>
             </div>
           </div>
 
@@ -787,6 +796,10 @@ onMounted(() => {
   font-size: 13px;
   color: #909399;
 }
+/* 状态流程下拉框固定在「创建人/创建时间」行右侧 */
+.meta-status {
+  margin-left: auto;
+}
 .editor-wrapper {
   border: 1px solid #ccc;
   border-radius: 4px;
@@ -823,6 +836,15 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  /* 超出 tab 内容区时内部滚动（与评论列表行为一致）；父级 el-tab-pane 的 height:100% 使本链成立 */
+  height: 100%;
+  overflow-y: auto;
+  /* 滚到边界时不再联动外层滚动 */
+  overscroll-behavior: contain;
+}
+/* 无变更记录时「暂无变更记录」垂直居中 */
+.history-list .el-empty:only-child {
+  margin: auto;
 }
 .history-item {
   font-size: 13px;

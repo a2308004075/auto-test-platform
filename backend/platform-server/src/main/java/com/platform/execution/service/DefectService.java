@@ -207,6 +207,10 @@ public class DefectService {
             throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "无效的状态：" + targetStatus);
         }
         String oldStatus = defect.getStatus();
+        // 新建为初始状态：流转出去后不允许再切回（与前端状态下拉选项过滤一致）
+        if ("NEW".equals(targetStatus) && !"NEW".equals(oldStatus)) {
+            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "新建为初始状态，不允许从其他状态流转回新建");
+        }
         defect.setStatus(targetStatus);
         if ("REOPENED".equals(targetStatus)) {
             defect.setReopenCount((defect.getReopenCount() == null ? 0 : defect.getReopenCount()) + 1);
