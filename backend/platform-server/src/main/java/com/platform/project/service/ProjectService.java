@@ -45,6 +45,7 @@ import com.platform.repository.entity.CodeRepositoryGroup;
 import com.platform.repository.mapper.CodeRepositoryGroupMapper;
 import com.platform.requirement.entity.RequirementGroup;
 import com.platform.requirement.mapper.RequirementGroupMapper;
+import com.platform.sys.service.CustomFieldService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
@@ -81,6 +82,7 @@ public class ProjectService {
     private final ProjectDocGroupMapper projectDocGroupMapper;
     private final CodeRepositoryGroupMapper codeRepositoryGroupMapper;
     private final RequirementGroupMapper requirementGroupMapper;
+    private final CustomFieldService customFieldService;
 
     /**
      * 分页查询项目列表（含卡片统计）
@@ -180,6 +182,9 @@ public class ProjectService {
         createSystemRepositoryGroup(project.getId(), "未分组", null, "未分组的仓库");
 
         createSystemRequirementGroup(project.getId(), "未分组", null, "未分组的需求版本");
+
+        // 预置缺陷"状态"字段（【字段管理-编辑缺陷】视图，流转状态下拉框的选项来源）
+        customFieldService.createDefaultStatusField(project.getId());
 
         return toResponse(project);
     }

@@ -8,11 +8,11 @@
  * 缺陷列表
  * 左侧分组树 + 右侧高级搜索 + 批量操作 + 分页表格
  */
-import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, reactive, nextTick, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  getDefects, deleteDefect,
+  getDefects, deleteDefect, updateDefect, transitionDefectStatus,
   getDefectGroups, createDefectGroup, updateDefectGroup,
   deleteDefectGroup, clearDefectGroupDefects, clearDefectProjectDefects
 } from '@/api/defect'
@@ -20,12 +20,13 @@ import PageHeader from '@/components/PageHeader/index.vue'
 import ProSearchCard from '@/components/ProSearchCard/index.vue'
 import BatchBar from '@/components/BatchBar/index.vue'
 import ProPagination from '@/components/ProPagination/index.vue'
-import { useDict } from '@/composables/useDict'
+import { useDefectStatusOptions } from '@/composables/useDefectStatus'
 
 const route = useRoute()
 const router = useRouter()
 const projectId = computed(() => Number(route.params.id))
-const { options: statusOptions } = useDict('defect_status')
+// 状态选项优先读【字段管理-编辑缺陷】的"状态"字段配置（按项目），无配置回退字典
+const { options: statusOptions } = useDefectStatusOptions(() => projectId.value)
 
 // ===== 列表数据 =====
 const loading = ref(false)
@@ -222,7 +223,6 @@ const batchMoveTarget = ref<number | null>(null)
 async function handleBatchMove() {
   if (!batchMoveTarget.value) { ElMessage.warning('请选择目标分组'); return }
   try {
-    const { updateDefect } = await import('@/api/defect')
     for (const id of selectedIds.value) {
       await updateDefect(projectId.value, id, { groupId: batchMoveTarget.value })
     }
@@ -241,6 +241,65 @@ function openCreate() {
 
 function handleView(record: any) {
   router.push(`/project/${projectId.value}/defects/${record.id}`)
+}
+
+// ===== 标题行内编辑（点击即改，失焦/回车自动保存） =====
+const titleEditingId = ref<number | null>(null)
+const titleEditingValue = ref('')
+const titleInputRef = ref()
+
+/** 点击缺陷标题：进入行内编辑 */
+function startTitleEdit(row: any) {
+  titleEditingId.value = row.id
+  titleEditingValue.value = row.title || ''
+  nextTick(() => {
+    const input = titleInputRef.value as any
+    if (input) {
+      input.focus()
+      if (typeof input.select === 'function') input.select()
+    }
+  })
+}
+
+/** 标题失焦/回车：退出编辑并自动保存（空标题回退原值） */
+async function handleTitleBlur(row: any) {
+  if (titleEditingId.value !== row.id) return
+  titleEditingId.value = null
+  const title = titleEditingValue.value.trim()
+  if (!title) {
+    ElMessage.warning('缺陷标题不能为空')
+    return
+  }
+  if (title === (row.title || '')) return
+  try {
+    await updateDefect(projectId.value, row.id, { title })
+    ElMessage.success('已保存')
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '保存失败')
+  } finally {
+    fetchList()
+  }
+}
+
+// ===== 状态流转（列表内直接修改，调专用 transition 接口） =====
+
+/** 每行的可选状态：NEW 为初始状态，流转出去后不允许切回（与详情页/后端校验一致） */
+function selectableStatusOptions(row: any) {
+  return row.status === 'NEW'
+    ? statusOptions.value
+    : statusOptions.value.filter((s: any) => s.value !== 'NEW')
+}
+
+/** 切换状态：成功后刷新列表；失败时下拉值随 model-value 自动回退 */
+async function handleTransition(row: any, targetStatus: string) {
+  if (targetStatus === row.status) return
+  try {
+    await transitionDefectStatus(projectId.value, row.id, { targetStatus })
+    ElMessage.success('状态更新成功')
+    fetchList()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '操作失败')
+  }
 }
 
 function handleDelete(record: any) {
@@ -285,25 +344,6 @@ function handleDeleteGroup(g: any) {
     .then(async () => { await deleteDefectGroup(projectId.value, g.id); ElMessage.success('删除成功'); fetchGroups() })
     .catch(() => {})
 }
-
-// ===== 常量映射 =====
-// 标签色为前端展示样式；状态名称统一取自字典（sys_dict: defect_status）
-const statusTypeMap: Record<string, string> = {
-  NEW: 'info',
-  TO_CONFIRM: 'warning',
-  FIXING: 'primary',
-  TO_DEPLOY: 'warning',
-  PENDING: 'warning',
-  COMPLETED: 'success',
-  REOPENED: 'danger',
-  DEFERRED: 'info',
-  CLOSED: 'info',
-}
-const statusLabelMap = computed(() => {
-  const map: Record<string, string> = {}
-  statusOptions.value.forEach((o) => { map[o.value] = o.label })
-  return map
-})
 
 // ===== 生命周期 =====
 const treeRef = ref()
@@ -387,12 +427,31 @@ onBeforeUnmount(() => {
           <el-table-column prop="defectNo" label="缺陷编号" width="160" show-overflow-tooltip />
           <el-table-column prop="title" label="缺陷标题" min-width="200" show-overflow-tooltip>
             <template #default="{ row }">
-              <el-button type="primary" link @click="handleView(row)">{{ row.title }}</el-button>
+              <el-input
+                v-if="titleEditingId === row.id"
+                ref="titleInputRef"
+                v-model="titleEditingValue"
+                placeholder="请输入缺陷标题"
+                maxlength="500"
+                @blur="handleTitleBlur(row)"
+                @keyup.enter="handleTitleBlur(row)"
+              />
+              <span
+                v-else
+                class="defect-title-editable"
+                @click="startTitleEdit(row)"
+              >{{ row.title }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="100">
+          <el-table-column label="状态" width="130">
             <template #default="{ row }">
-              <el-tag :type="(statusTypeMap[row.status] || 'info') as any" size="small">{{ statusLabelMap[row.status] || row.status }}</el-tag>
+              <el-select
+                :model-value="row.status"
+                size="small"
+                @change="(val: string) => handleTransition(row, val)"
+              >
+                <el-option v-for="s in selectableStatusOptions(row)" :key="s.value" :value="s.value" :label="s.label" />
+              </el-select>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="170" fixed="right">
@@ -489,6 +548,8 @@ onBeforeUnmount(() => {
 .group-count { font-size: 12px; color: #909399; flex-shrink: 0; }
 .group-lock { font-size: 10px; color: #c0c4cc; flex-shrink: 0; margin-left: 2px; }
 .case-content { flex: 1; min-width: 0; }
+/* 缺陷标题：点击行内编辑（悬浮变色提示可编辑，鼠标保持默认箭头不变手型） */
+.defect-title-editable:hover { color: #409eff; }
 
 .context-menu { position: fixed; background: #fff; border: 1px solid #ebeef5; border-radius: 4px; box-shadow: 0 2px 12px rgba(0,0,0,0.1); padding: 4px 0; min-width: 130px; z-index: 9999; }
 .context-menu-item { padding: 7px 14px; font-size: 13px; color: #303133; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: background 0.15s; }

@@ -48,6 +48,17 @@ public class CustomFieldService {
             "text", "textarea", "select", "datetime", "number", "user", "environment"));
 
     /**
+     * 缺陷状态字段的固定 fieldKey：缺陷列表/详情页流转状态下拉框的选项来源
+     */
+    public static final String DEFECT_STATUS_FIELD_KEY = "defect_status";
+
+    /**
+     * 新建项目时预置的状态选项（value 与 defect.status 现有英文编码一致，存量数据无需迁移）
+     */
+    private static final String DEFAULT_DEFECT_STATUS_OPTIONS_JSON =
+            "[{\"label\":\"新建\",\"value\":\"NEW\"},{\"label\":\"待确认\",\"value\":\"TO_CONFIRM\"},{\"label\":\"修复中\",\"value\":\"FIXING\"},{\"label\":\"待部署\",\"value\":\"TO_DEPLOY\"},{\"label\":\"待验证\",\"value\":\"PENDING\"},{\"label\":\"已修复\",\"value\":\"COMPLETED\"},{\"label\":\"重新打开\",\"value\":\"REOPENED\"},{\"label\":\"延期修复\",\"value\":\"DEFERRED\"},{\"label\":\"无需修复\",\"value\":\"CLOSED\"}]";
+
+    /**
      * 管理页列表（按 sortNo 排序）
      */
     public List<CustomFieldListItem> listByConfig(Long projectId, String module, String viewType) {
@@ -123,6 +134,29 @@ public class CustomFieldService {
     }
 
     /**
+     * 为项目预置缺陷"状态"字段（【字段管理-编辑缺陷】视图）
+     *
+     * <p>新建项目时调用：状态字段是流转状态下拉框的选项来源，须始终可配置；
+     * 选项 value 沿用 defect.status 现有英文编码，存量数据无需迁移
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void createDefaultStatusField(Long projectId) {
+        CustomField field = new CustomField();
+        field.setProjectId(projectId);
+        field.setModule("defect");
+        field.setViewType("edit");
+        field.setFieldKey(DEFECT_STATUS_FIELD_KEY);
+        field.setFieldLabel("状态");
+        field.setDescription("缺陷流转状态下拉框的枚举选项：可增删选项、修改显示名、调整顺序；删除选项后存量缺陷保留原状态值");
+        field.setFieldType("select");
+        field.setOptionsJson(DEFAULT_DEFECT_STATUS_OPTIONS_JSON);
+        field.setIsRequired(0);
+        field.setSortNo(99);
+        field.setIsActive(1);
+        customFieldMapper.insert(field);
+    }
+
+    /**
      * 删除字段（软删除）
      */
     @Transactional(rollbackFor = Exception.class)
@@ -130,6 +164,11 @@ public class CustomFieldService {
         CustomField field = customFieldMapper.selectById(id);
         if (field == null) {
             throw new BusinessException(ErrorCode.CUSTOM_FIELD_NOT_FOUND, "字段不存在");
+        }
+        // 状态字段是流转状态下拉框的选项来源，且新建字段的 fieldKey 为自动生成的 UUID，
+        // 删除后无法重建同 fieldKey 的字段，故禁止删除
+        if (DEFECT_STATUS_FIELD_KEY.equals(field.getFieldKey())) {
+            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "系统预置的状态字段不可删除");
         }
         customFieldMapper.deleteById(id);
     }

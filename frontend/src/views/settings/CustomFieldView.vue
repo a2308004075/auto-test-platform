@@ -119,6 +119,7 @@ const fieldList = ref<any[]>([])
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const editingId = ref<number | null>(null)
+const editingFieldKey = ref('')
 const saving = ref(false)
 
 const form = reactive({
@@ -131,9 +132,12 @@ const form = reactive({
   sortNo: 0,
 })
 
-// 下拉框选项动态编辑（仅填显示文本，存储值保存时按选项顺序自动生成 1、2、3…）
-const optionRows = ref<{ label: string }[]>([])
+// 下拉框选项动态编辑（仅填显示文本；存储值：普通字段保存时按顺序自动生成 1、2、3…，
+// 状态字段保留各行原编码、新增行生成 CUSTOM_ 编码，避免改动 defect.status 存量值）
+const optionRows = ref<{ label: string; value?: string }[]>([])
 const isSelectType = computed(() => form.fieldType === 'select')
+// 状态字段（fieldKey=defect_status）：流转状态下拉框的选项来源，编码不可重排、类型不可改、不可删除
+const isStatusField = computed(() => isEdit.value && editingFieldKey.value === 'defect_status')
 
 // 类型切换时清理互斥配置（枚举选项仅 select 用）
 function handleFieldTypeChange() {
@@ -197,6 +201,7 @@ function truncateDescription(text: string): string {
 function resetForm() {
   isEdit.value = false
   editingId.value = null
+  editingFieldKey.value = ''
   form.fieldLabel = ''
   form.fieldType = 'text'
   form.description = ''
@@ -215,6 +220,7 @@ function openCreate() {
 function openEdit(row: any) {
   isEdit.value = true
   editingId.value = row.id
+  editingFieldKey.value = row.fieldKey || ''
   form.fieldLabel = row.fieldLabel
   form.fieldType = row.fieldType
   form.description = row.description || ''
@@ -223,12 +229,15 @@ function openEdit(row: any) {
   form.isRequired = row.isRequired || 0
   form.sortNo = row.sortNo || 0
 
-  // 解析已有选项（仅取显示文本；存储值保存时按顺序重新生成）
+  // 解析已有选项（仅取显示文本；状态字段额外保留各选项原编码，改显示名不影响存储值）
   if (row.fieldType === 'select' && row.optionsJson) {
     try {
       const parsed = JSON.parse(row.optionsJson)
       optionRows.value = Array.isArray(parsed)
-        ? parsed.map((o: any) => ({ label: String(o?.label ?? '') }))
+        ? parsed.map((o: any) => ({
+            label: String(o?.label ?? ''),
+            value: isStatusField.value ? String(o?.value ?? '') : undefined,
+          }))
         : []
     } catch {
       optionRows.value = []
@@ -241,8 +250,14 @@ function openEdit(row: any) {
 }
 
 // ===== 选项操作 =====
+// 状态字段新增选项：立即生成编码（时间戳 + 自增序号防重复），行身份在编辑过程中保持稳定
+let statusValueSeq = 0
+function generateStatusValue() {
+  return `CUSTOM_${Date.now().toString(36).toUpperCase()}${(++statusValueSeq).toString(36).toUpperCase()}`
+}
+
 function addOptionRow() {
-  optionRows.value.push({ label: '' })
+  optionRows.value.push(isStatusField.value ? { label: '', value: generateStatusValue() } : { label: '' })
 }
 
 function removeOptionRow(index: number) {
@@ -260,11 +275,13 @@ async function handleSubmit() {
     return
   }
 
-  // 构建 optionsJson（仅 select 类型；存储值按选项顺序自动生成 1、2、3…，0 保留为默认/未设置）
+  // 构建 optionsJson（仅 select 类型）：普通字段存储值按选项顺序自动生成 1、2、3…（0 保留为默认/未设置）；
+  // 状态字段保留各选项原编码（系统英文码 + CUSTOM_ 自定义码），避免改动 defect.status 存量值
   if (isSelectType.value) {
-    const validOptions = optionRows.value
-      .filter((r) => r.label.trim())
-      .map((r, index) => ({ label: r.label, value: String(index + 1) }))
+    const validRows = optionRows.value.filter((r) => r.label.trim())
+    const validOptions = isStatusField.value
+      ? validRows.map((r) => ({ label: r.label, value: r.value || generateStatusValue() }))
+      : validRows.map((r, index) => ({ label: r.label, value: String(index + 1) }))
     form.optionsJson = JSON.stringify(validOptions)
   } else {
     form.optionsJson = ''
@@ -487,8 +504,9 @@ async function handleDelete(row: any) {
                       >
                         编辑
                       </el-button>
+                      <!-- 状态字段不可删除（后端同样校验）：新建字段的 fieldKey 为自动生成的 UUID，删除后无法重建 -->
                       <el-button
-                        v-if="hasPermission('system:custom-field:delete')"
+                        v-if="hasPermission('system:custom-field:delete') && row.fieldKey !== 'defect_status'"
                         link
                         type="danger"
                         size="small"
@@ -522,10 +540,12 @@ async function handleDelete(row: any) {
             <el-input v-model="form.fieldLabel" placeholder="如：严重程度" maxlength="50" />
           </el-form-item>
           <el-form-item label="字段类型" required>
+            <!-- 状态字段类型固定为下拉框：改型会使流转状态配置失效 -->
             <el-select
               v-model="form.fieldType"
               placeholder="请选择类型"
               style="width: 100%"
+              :disabled="isStatusField"
               @change="handleFieldTypeChange"
             >
               <el-option v-for="t in fieldTypeOptions" :key="t.value" :value="t.value" :label="t.label" />
@@ -553,8 +573,11 @@ async function handleDelete(row: any) {
             />
           </el-form-item>
 
-          <!-- 下拉框选项配置（跨两列；存储值由系统按顺序自动生成） -->
+          <!-- 下拉框选项配置（跨两列；普通字段存储值按顺序自动生成，状态字段保留原编码、新增行自动生成 CUSTOM_ 编码） -->
           <el-form-item v-if="isSelectType" label="枚举选项" class="span-2">
+            <div v-if="isStatusField" class="status-field-tip">
+              此字段为缺陷流转状态下拉框的枚举来源：可增删选项、修改显示名、调整顺序；删除选项后存量缺陷保留原状态值
+            </div>
             <div class="option-rows">
               <div v-for="(row, index) in optionRows" :key="index" class="option-row">
                 <el-input v-model="row.label" placeholder="显示文本" style="flex: 1" />
@@ -727,6 +750,18 @@ async function handleDelete(row: any) {
 }
 .cf-desc-empty {
   color: #c0c4cc;
+}
+
+/* 状态字段编辑提示：说明此字段为流转状态下拉框的枚举来源 */
+.status-field-tip {
+  width: 100%;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  background: #f5f7fa;
+  border-radius: 4px;
 }
 
 .option-rows {

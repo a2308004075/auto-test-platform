@@ -25,6 +25,7 @@ import DynamicFieldGrid from '@/components/DynamicFieldGrid/index.vue'
 import CommentPanel from '@/components/CommentPanel/index.vue'
 import { getCustomFieldsForRender } from '@/api/customField'
 import { useDict } from '@/composables/useDict'
+import { useDefectStatusOptions } from '@/composables/useDefectStatus'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
 import '@wangeditor/editor/dist/css/style.css'
 
@@ -34,7 +35,8 @@ const projectId = computed(() => Number(route.params.id))
 const defectId = computed(() => Number(route.params.defectId))
 const { options: relationTypeOptions } = useDict('defect_relation_type')
 const { options: targetTypeOptions } = useDict('defect_target_type')
-const { options: statusOptions } = useDict('defect_status')
+// 状态选项优先读【字段管理-编辑缺陷】的"状态"字段配置（按项目），无配置回退字典
+const { options: statusOptions } = useDefectStatusOptions(() => projectId.value)
 
 const relationTypeLabelMap = computed(() => {
   const map: Record<string, string> = {}
@@ -261,7 +263,8 @@ async function fetchEditFields() {
       module: 'defect',
       viewType: 'edit',
     })
-    editFields.value = res.data || []
+    // 状态字段（defect_status）仅作为流转下拉框的选项来源，不进字段信息区渲染（其值走 defect.status，不走自定义字段值）
+    editFields.value = (res.data || []).filter((f: any) => f.fieldKey !== 'defect_status')
   } catch { editFields.value = [] }
 }
 

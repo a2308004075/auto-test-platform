@@ -14,6 +14,7 @@ import { getDefectRelationsByTarget } from '@/api/relation'
 import { addDefectRelation, deleteDefectRelation } from '@/api/defect'
 import DefectSelectDialog from '@/components/DefectSelectDialog/index.vue'
 import { useDict } from '@/composables/useDict'
+import { useDefectStatusOptions } from '@/composables/useDefectStatus'
 
 const props = defineProps<{
   projectId: number
@@ -31,7 +32,8 @@ const relationTypeLabelMap = computed(() => {
   return map
 })
 
-const { options: statusOptions } = useDict('defect_status')
+// 状态选项优先读【字段管理-编辑缺陷】的"状态"字段配置（按项目），无配置回退字典
+const { options: statusOptions } = useDefectStatusOptions(() => props.projectId)
 const statusLabelMap = computed(() => {
   const map: Record<string, string> = {}
   statusOptions.value.forEach((o) => {

@@ -20,6 +20,9 @@ import com.platform.execution.dto.*;
 import com.platform.execution.entity.*;
 import com.platform.execution.mapper.*;
 import com.platform.project.service.ProjectService;
+import com.platform.sys.entity.CustomField;
+import com.platform.sys.mapper.CustomFieldMapper;
+import com.platform.sys.service.CustomFieldService;
 import com.platform.sys.service.CustomFieldValueService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -57,7 +60,9 @@ public class DefectService {
     private final EnvironmentMapper environmentMapper;
     private final CustomFieldValueService customFieldValueService;
     private final CommentService commentService;
+    private final CustomFieldMapper customFieldMapper;
 
+    /** 内置状态集合（回退用）：项目未在【字段管理-编辑缺陷】配置"状态"字段时的合法状态 */
     private static final Set<String> VALID_STATUSES = new HashSet<>(Arrays.asList(
             "NEW", "TO_CONFIRM", "FIXING", "TO_DEPLOY", "PENDING", "COMPLETED", "REOPENED", "DEFERRED", "CLOSED"));
     private static final Set<String> HISTORY_FIELDS = new HashSet<>(Arrays.asList(
@@ -210,7 +215,8 @@ public class DefectService {
     public DefectResponse transitionStatus(Long defectId, DefectStatusTransitionRequest request) {
         Defect defect = findById(defectId);
         String targetStatus = request.getTargetStatus();
-        if (!VALID_STATUSES.contains(targetStatus)) {
+        // 合法状态优先取【字段管理-编辑缺陷】的"状态"字段配置（按项目），无配置回退内置集合
+        if (!loadValidStatuses(defect.getProjectId()).contains(targetStatus)) {
             throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "无效的状态：" + targetStatus);
         }
         String oldStatus = defect.getStatus();
@@ -230,6 +236,38 @@ public class DefectService {
             saveHistory(defectId, "remark", null, request.getRemark());
         }
         return toListResponse(defect);
+    }
+
+    /**
+     * 项目可用状态集合：读【字段管理-编辑缺陷】"状态"字段（fieldKey=defect_status）的选项 value，
+     * 无配置或解析失败时回退内置 VALID_STATUSES
+     */
+    private Set<String> loadValidStatuses(Long projectId) {
+        LambdaQueryWrapper<CustomField> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(CustomField::getProjectId, projectId)
+                .eq(CustomField::getModule, "defect")
+                .eq(CustomField::getViewType, "edit")
+                .eq(CustomField::getFieldKey, CustomFieldService.DEFECT_STATUS_FIELD_KEY)
+                .eq(CustomField::getIsActive, 1);
+        CustomField field = customFieldMapper.selectOne(wrapper);
+        if (field == null || !StringUtils.hasText(field.getOptionsJson())) {
+            return VALID_STATUSES;
+        }
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            List<Map<String, String>> rows = mapper.readValue(field.getOptionsJson(),
+                    mapper.getTypeFactory().constructCollectionType(List.class, Map.class));
+            Set<String> values = new HashSet<>();
+            for (Map<String, String> row : rows) {
+                if (StringUtils.hasText(row.get("value"))) {
+                    values.add(row.get("value"));
+                }
+            }
+            return values.isEmpty() ? VALID_STATUSES : values;
+        } catch (Exception e) {
+            log.warn("解析状态字段选项 JSON 失败，回退内置状态集合: {}", field.getOptionsJson(), e);
+            return VALID_STATUSES;
+        }
     }
 
     /**
