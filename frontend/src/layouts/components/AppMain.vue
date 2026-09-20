@@ -32,7 +32,10 @@ const tagsViewStore = useTagsViewStore()
 
 <style scoped>
 .app-main {
-  flex: 1;
+  /* flex 撑满再加 margin 会使 margin-box 超出容器（产生整页幽灵滚动条），
+     故不伸缩、显式扣除上下 margin 的高度 */
+  flex: 0 0 auto;
+  height: calc(100% - 32px);
   margin: 16px;
   padding: 20px;
   background: #fff;

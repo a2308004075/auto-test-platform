@@ -403,7 +403,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div>
+  <div class="defect-detail-page">
     <PageHeader :title="detail.defectNo || '缺陷详情'">
       <!-- 编号右侧：标题（查看态文本 / 编辑态输入框） -->
       <template #title-suffix>
@@ -636,34 +636,86 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* 左右两栏：左侧主信息 + 右侧评论/变更记录面板 */
+/* 页面撑满可视主区：相对 .app-main-wrapper（Layout 中 position: relative）绝对定位，
+   不依赖中间层 flex 高度的百分比解析；卡片样式内聚到本页，覆盖同位的 .app-main */
+.defect-detail-page {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
+  padding: 20px;
+  background: #fff;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+}
+/* 左右两栏：左侧主信息 + 右侧评论/变更记录面板。
+   注意不可加 flex-wrap：wrap 容器在子项内容高于容器时会把行高按内容撑开，
+   导致 align-items:stretch 失效、子项溢出产生外层滚动条；窄屏由媒体查询改为堆叠 */
 .detail-layout {
   display: flex;
-  flex-wrap: wrap;
   align-items: stretch;
   gap: 16px;
+  flex: 1;
+  min-height: 0;
 }
 .detail-main {
   flex: 1 1 560px;
   min-width: 420px;
+  min-height: 0;
+  overflow-y: auto;
+  /* 滚到边界时不再联动外层页面滚动 */
+  overscroll-behavior: contain;
 }
 .detail-side {
-  flex: 0 0 400px;
+  /* 允许收缩：窄一点时左右两栏仍同行，避免在断点附近换行溢出产生外层滚动条 */
+  flex: 0 1 400px;
+  min-width: 360px;
   max-width: 100%;
   background: #fff;
   border: 1px solid #ebeef5;
   border-radius: 6px;
   padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 @media (max-width: 1180px) {
-  .detail-main,
-  .detail-side {
-    flex-basis: 100%;
-    min-width: 0;
+  /* 窄屏：整页仍固定高度（不出现外层滚动条），双栏上下堆叠、各自内部滚动 */
+  .detail-layout {
+    flex-direction: column;
+    flex-wrap: nowrap;
   }
+  .detail-main {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
+  }
+  .detail-side {
+    flex: 0 0 40%;
+    max-width: 100%;
+    min-width: 0;
+    min-height: 0;
+  }
+}
+.side-tabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .side-tabs :deep(.el-tabs__header) {
   margin-bottom: 12px;
+  flex-shrink: 0;
+}
+/* 评论 / 变更记录内容超出时内部滚轮 */
+.side-tabs :deep(.el-tabs__content) {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* 滚到边界时不再联动外层页面滚动 */
+  overscroll-behavior: contain;
 }
 .detail-card {
   background: #fff;
