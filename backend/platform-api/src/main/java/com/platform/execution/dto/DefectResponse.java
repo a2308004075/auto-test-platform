@@ -59,7 +59,7 @@ public class DefectResponse implements Serializable {
     private LocalDateTime updatedAt;
 
     /**
-     * 自定义字段值（fieldKey -> 值；详情接口返回，由【字段管理】动态配置驱动）
+     * 自定义字段值（fieldKey -> 值；详情与列表接口均返回，由【字段管理】动态配置驱动）
      */
     private Map<String, String> customFields;
 

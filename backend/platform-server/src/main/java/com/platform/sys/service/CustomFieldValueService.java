@@ -159,6 +159,52 @@ public class CustomFieldValueService {
     }
 
     /**
+     * 批量读取多个业务实体的自定义字段值（列表页用，避免逐条 N+1 查询）
+     *
+     * <p>语义与 {@link #loadValues} 一致：跨视图读取，同一 fieldKey 多视图配置时取第一个有值的
+     *
+     * @return entityId -> (fieldKey -> value)
+     */
+    public Map<Long, Map<String, String>> loadValuesBatch(Long projectId, String module, List<Long> entityIds) {
+        Map<Long, Map<String, String>> result = new HashMap<>();
+        if (entityIds == null || entityIds.isEmpty()) {
+            return result;
+        }
+        // 该项目 + 模块下的全部字段（含 create/edit 两视图，is_active=1；viewType 升序让 create 优先）
+        LambdaQueryWrapper<CustomField> fieldWrapper = new LambdaQueryWrapper<>();
+        fieldWrapper.eq(CustomField::getProjectId, projectId)
+                .eq(CustomField::getModule, module)
+                .eq(CustomField::getIsActive, 1)
+                .orderByAsc(CustomField::getViewType);
+        List<CustomField> fields = customFieldMapper.selectList(fieldWrapper);
+        if (fields.isEmpty()) {
+            return result;
+        }
+
+        // 全部实体的字段值，按 entityId 分组（fieldId -> value）
+        LambdaQueryWrapper<CustomFieldValue> valueWrapper = new LambdaQueryWrapper<>();
+        valueWrapper.eq(CustomFieldValue::getModule, module)
+                .in(CustomFieldValue::getEntityId, entityIds);
+        Map<Long, Map<Long, String>> valueByEntity = customFieldValueMapper.selectList(valueWrapper).stream()
+                .filter(v -> v.getFieldValue() != null)
+                .collect(Collectors.groupingBy(CustomFieldValue::getEntityId,
+                        Collectors.toMap(CustomFieldValue::getFieldId, CustomFieldValue::getFieldValue, (a, b) -> a)));
+
+        for (Long entityId : entityIds) {
+            Map<Long, String> valueMap = valueByEntity.getOrDefault(entityId, new HashMap<>());
+            Map<String, String> entityResult = new HashMap<>();
+            for (CustomField field : fields) {
+                String value = valueMap.get(field.getId());
+                if (value != null && !entityResult.containsKey(field.getFieldKey())) {
+                    entityResult.put(field.getFieldKey(), value);
+                }
+            }
+            result.put(entityId, entityResult);
+        }
+        return result;
+    }
+
+    /**
      * 删除业务实体的全部自定义字段值（业务实体删除时级联清理）
      */
     @Transactional(rollbackFor = Exception.class)

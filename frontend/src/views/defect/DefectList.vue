@@ -21,6 +21,7 @@ import ProSearchCard from '@/components/ProSearchCard/index.vue'
 import BatchBar from '@/components/BatchBar/index.vue'
 import ProPagination from '@/components/ProPagination/index.vue'
 import { useDefectStatusOptions } from '@/composables/useDefectStatus'
+import { getCustomFieldsForRender } from '@/api/customField'
 
 const route = useRoute()
 const router = useRouter()
@@ -308,6 +309,41 @@ function handleDelete(record: any) {
     .catch(() => {})
 }
 
+// ===== 动态字段列（与详情页"字段信息"同源：【字段管理-编辑缺陷】视图） =====
+const displayFields = ref<any[]>([])
+
+/** 加载列表动态列：状态走专门列、多行文本内容长不进列表 */
+async function fetchDisplayFields() {
+  try {
+    const res: any = await getCustomFieldsForRender({
+      projectId: projectId.value,
+      module: 'defect',
+      viewType: 'edit',
+    })
+    displayFields.value = (res.data || []).filter(
+      (f: any) => f.fieldKey !== 'defect_status' && f.fieldType !== 'textarea',
+    )
+  } catch { displayFields.value = [] }
+}
+
+/** 解析动态字段选项：优先 field.options，回退 optionsJson（与 DynamicFieldGrid 逻辑一致） */
+function parseFieldOptions(field: any): any[] {
+  if (field?.options && field.options.length > 0) return field.options
+  if (!field?.optionsJson) return []
+  try { return JSON.parse(field.optionsJson) } catch { return [] }
+}
+
+/** 动态字段列显示文本：下拉/用户/环境类按 value 翻译 label，其余原样显示 */
+function fieldDisplayText(field: any, row: any): string {
+  const value = row.customFields?.[field.fieldKey]
+  if (value === undefined || value === null || value === '') return ''
+  if (['select', 'user', 'environment'].includes(field.fieldType)) {
+    const hit = parseFieldOptions(field).find((o: any) => String(o.value) === String(value))
+    return hit ? hit.label : value
+  }
+  return value
+}
+
 // ===== 分组 CRUD =====
 const groupModalVisible = ref(false)
 const editingGroupId = ref<number>(0)
@@ -349,7 +385,7 @@ function handleDeleteGroup(g: any) {
 const treeRef = ref()
 function onDocClick() { closeContextMenu() }
 onMounted(() => {
-  fetchGroups(); fetchList()
+  fetchGroups(); fetchList(); fetchDisplayFields()
   document.addEventListener('click', onDocClick)
 })
 onBeforeUnmount(() => {
@@ -452,6 +488,29 @@ onBeforeUnmount(() => {
               >
                 <el-option v-for="s in selectableStatusOptions(row)" :key="s.value" :value="s.value" :label="s.label" />
               </el-select>
+            </template>
+          </el-table-column>
+          <!-- 所属分组（与详情页"字段信息"区一致：未分组时显示"未分组"） -->
+          <el-table-column label="所属分组" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ row.groupName || '未分组' }}
+            </template>
+          </el-table-column>
+          <!-- 动态字段列（【字段管理-编辑缺陷】视图，与详情页"字段信息"同源） -->
+          <el-table-column
+            v-for="field in displayFields"
+            :key="field.fieldKey"
+            :label="field.fieldLabel"
+            :min-width="field.fieldType === 'datetime' ? 150 : 120"
+            show-overflow-tooltip
+          >
+            <template #default="{ row }">
+              {{ fieldDisplayText(field, row) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="创建时间" width="150">
+            <template #default="{ row }">
+              {{ row.createdAt?.substring(0, 16)?.replace('T', ' ') }}
             </template>
           </el-table-column>
           <el-table-column label="操作" width="170" fixed="right">

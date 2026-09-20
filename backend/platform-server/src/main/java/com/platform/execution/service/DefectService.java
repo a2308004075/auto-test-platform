@@ -106,9 +106,15 @@ public class DefectService {
         wrapper.orderByDesc(Defect::getCreatedAt);
 
         Page<Defect> result = defectMapper.selectPage(new Page<>(page, pageSize), wrapper);
-        List<DefectResponse> records = new ArrayList<>(result.getRecords().size());
-        for (Defect d : result.getRecords()) {
-            records.add(toListResponse(d));
+        List<Defect> defects = result.getRecords();
+        // 批量加载自定义字段值（由【字段管理】动态配置驱动，列表页动态列展示用），避免逐条 N+1 查询
+        Map<Long, Map<String, String>> customValues = customFieldValueService.loadValuesBatch(
+                projectId, "defect", defects.stream().map(Defect::getId).collect(Collectors.toList()));
+        List<DefectResponse> records = new ArrayList<>(defects.size());
+        for (Defect d : defects) {
+            DefectResponse resp = toListResponse(d);
+            resp.setCustomFields(customValues.get(d.getId()));
+            records.add(resp);
         }
         return PageResponse.of(records, result.getTotal(), page, pageSize);
     }
