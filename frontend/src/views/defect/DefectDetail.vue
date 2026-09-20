@@ -466,15 +466,16 @@ onMounted(() => {
             <div class="detail-meta">
               <span class="meta-item">创建人：{{ detail.createdByName || '-' }}</span>
               <span class="meta-item">创建时间：{{ detail.createdAt }}</span>
-              <el-select
-                v-if="!editing"
-                class="meta-status"
-                :model-value="detail.status"
-                style="width: 110px"
-                @change="(val: string) => handleTransition(val)"
-              >
-                <el-option v-for="s in selectableStatusOptions" :key="s.value" :value="s.value" :label="s.label" />
-              </el-select>
+              <div v-if="!editing" class="meta-status-group">
+                <span class="meta-item">状态：</span>
+                <el-select
+                  :model-value="detail.status"
+                  style="width: 110px"
+                  @change="(val: string) => handleTransition(val)"
+                >
+                  <el-option v-for="s in selectableStatusOptions" :key="s.value" :value="s.value" :label="s.label" />
+                </el-select>
+              </div>
             </div>
           </div>
 
@@ -592,7 +593,7 @@ onMounted(() => {
                   <span>更新了 {{ historyFieldLabel(h.fieldName) }}</span>
                   <span class="history-time">{{ formatHistoryTime(h.createdAt) }}</span>
                 </div>
-                <div class="history-values">
+                <div v-if="h.oldValue || h.newValue" class="history-values">
                   <span class="history-value old">{{ historyValueText(h.fieldName, h.oldValue) }}</span>
                   <span class="history-arrow">→</span>
                   <span class="history-value new">{{ historyValueText(h.fieldName, h.newValue) }}</span>
@@ -802,10 +803,7 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* 页头标题：任意模式下点击即行内编辑 */
-.header-title-editable {
-  cursor: pointer;
-}
+/* 页头标题：任意模式下点击即行内编辑（鼠标保持默认样式，不做手型暗示） */
 .header-title-editable:hover {
   color: #409eff;
 }
@@ -830,9 +828,12 @@ onMounted(() => {
   font-size: 13px;
   color: #909399;
 }
-/* 状态流程下拉框固定在「创建人/创建时间」行右侧 */
-.meta-status {
+/* 状态流程下拉框组（「状态：」+ 下拉框）固定在「创建人/创建时间」行右侧 */
+.meta-status-group {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .editor-wrapper {
   border: 1px solid #ccc;

@@ -382,6 +382,11 @@ public class DefectService {
             String oldVal = oldValues.get(field);
             String newVal = newValues.get(field);
             if (!Objects.equals(oldVal, newVal)) {
+                // 内容只记录「有变更」：正文体积大且展示无意义，不落库具体值
+                if ("content".equals(field)) {
+                    oldVal = null;
+                    newVal = null;
+                }
                 DefectHistory history = new DefectHistory();
                 history.setDefectId(defectId);
                 history.setFieldName(field);
