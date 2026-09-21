@@ -357,6 +357,12 @@ async function handleGroupChange(val: number | string | undefined) {
   }
 }
 
+/** 返回上一页：优先浏览器历史返回（从哪来回哪去）；无历史记录（直接打开链接）时兜底跳转缺陷列表 */
+function handleBack() {
+  if (window.history.state?.back) router.back()
+  else router.push(`/project/${projectId.value}/defects`)
+}
+
 function handleDelete() {
   ElMessageBox.confirm(`确定删除缺陷「${detail.value.defectNo}」？`, '确认删除', { type: 'warning' })
     .then(async () => {
@@ -456,6 +462,8 @@ onMounted(() => {
           @click="startTitleEdit"
         >{{ detail.title }}</span>
       </template>
+      <!-- 返回上一页：导航操作，任意模式下均可用 -->
+      <el-button @click="handleBack">返回</el-button>
       <template v-if="!editing">
         <el-button type="danger" @click="handleDelete">删除</el-button>
       </template>
