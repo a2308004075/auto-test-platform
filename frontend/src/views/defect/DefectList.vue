@@ -37,6 +37,10 @@ const selectedRows = ref<any[]>([])
 
 // ===== 搜索条件 =====
 const search = reactive({ keyword: '', status: '' })
+// 动态字段筛选（fieldKey -> 值：单值字符串或日期范围 [start, end]）
+const searchCustom = reactive<Record<string, any>>({})
+// 创建时间范围筛选 [start, end]（yyyy-MM-dd）
+const searchCreatedAt = ref<[string, string] | null>(null)
 
 // ===== 分组 =====
 const groups = ref<any[]>([])
@@ -80,6 +84,18 @@ function filterNode(value: string, data: any) {
   return data.name.toLowerCase().includes(value.toLowerCase())
 }
 
+/** 搜索区分组筛选树（未分组 + 用户分组；与左侧分组树共用 activeGroupId，选中即联动高亮） */
+const groupFilterTree = computed(() => {
+  const build = (parentId: number | null): any[] =>
+    groups.value
+      .filter((g) => g.isSystem !== 1 && (g.parentId ?? null) === parentId)
+      .map((g) => {
+        const children = build(g.id)
+        return { id: g.id, name: g.name, ...(children.length > 0 ? { children } : {}) }
+      })
+  return [{ id: -1, name: '未分组' }, ...build(null)]
+})
+
 function onGroupNodeClick(data: any) {
   selectGroup(data.id)
 }
@@ -95,15 +111,37 @@ async function fetchList() {
   loading.value = true
   try {
     const groupIdParam = activeGroupId.value === 0 ? undefined : activeGroupId.value === -1 ? 0 : activeGroupId.value
+    // 动态字段筛选：组装 fieldKey -> 值（日期范围为 [start, end]，其余为字符串）
+    const customFilters: Record<string, any> = {}
+    for (const f of displayFields.value) {
+      const v = searchCustom[f.fieldKey]
+      if (v === undefined || v === null || v === '') continue
+      if (Array.isArray(v)) {
+        if (!v[0] && !v[1]) continue
+        customFilters[f.fieldKey] = v.map((x: any) => (x ? String(x) : ''))
+      } else {
+        customFilters[f.fieldKey] = String(v)
+      }
+    }
     const res: any = await getDefects(projectId.value, {
       groupId: groupIdParam,
       keyword: search.keyword || undefined,
       status: search.status || undefined,
+      createdAtStart: searchCreatedAt.value?.[0] || undefined,
+      createdAtEnd: searchCreatedAt.value?.[1] || undefined,
+      customFilters: Object.keys(customFilters).length > 0 ? JSON.stringify(customFilters) : undefined,
       page: pagination.current, pageSize: pagination.pageSize,
     })
     list.value = res.data?.items || []
     pagination.total = res.data?.total || 0
   } catch { list.value = [] } finally { loading.value = false }
+}
+
+/** 搜索区分组筛选：与左侧分组树联动（同一 activeGroupId），清空回到全部 */
+function handleFilterGroupChange(val: number | undefined) {
+  activeGroupId.value = (val ?? 0) as number
+  pagination.current = 1
+  fetchList()
 }
 
 function selectGroup(id: number) {
@@ -115,6 +153,9 @@ function selectGroup(id: number) {
 function handleSearch() { pagination.current = 1; fetchList() }
 function handleReset() {
   Object.assign(search, { keyword: '', status: '' })
+  for (const key of Object.keys(searchCustom)) delete searchCustom[key]
+  searchCreatedAt.value = null
+  activeGroupId.value = 0
   handleSearch()
 }
 
@@ -445,6 +486,71 @@ onBeforeUnmount(() => {
             <el-select v-model="search.status" placeholder="全部" clearable style="width: 120px">
               <el-option v-for="s in statusOptions" :key="s.value" :value="s.value" :label="s.label" />
             </el-select>
+          </div>
+          <div class="pro-search-field">
+            <span class="pro-search-label">所属分组</span>
+            <el-tree-select
+              :model-value="activeGroupId === 0 ? undefined : activeGroupId"
+              :data="groupFilterTree"
+              node-key="id"
+              :props="{ label: 'name', value: 'id', children: 'children' }"
+              check-strictly
+              clearable
+              filterable
+              placeholder="全部"
+              style="width: 160px"
+              @update:model-value="handleFilterGroupChange"
+            />
+          </div>
+          <div class="pro-search-field">
+            <span class="pro-search-label">创建时间</span>
+            <el-date-picker
+              v-model="searchCreatedAt"
+              type="daterange"
+              value-format="YYYY-MM-DD"
+              range-separator="至"
+              start-placeholder="开始"
+              end-placeholder="结束"
+              style="width: 240px"
+            />
+          </div>
+          <div v-for="field in displayFields" :key="field.fieldKey" class="pro-search-field">
+            <span class="pro-search-label">{{ field.fieldLabel }}</span>
+            <el-select
+              v-if="['select', 'user', 'environment'].includes(field.fieldType)"
+              v-model="searchCustom[field.fieldKey]"
+              placeholder="全部"
+              clearable
+              filterable
+              style="width: 140px"
+            >
+              <el-option v-for="o in parseFieldOptions(field)" :key="o.value" :value="o.value" :label="o.label" />
+            </el-select>
+            <el-date-picker
+              v-else-if="field.fieldType === 'datetime'"
+              v-model="searchCustom[field.fieldKey]"
+              type="daterange"
+              value-format="YYYY-MM-DD"
+              range-separator="至"
+              start-placeholder="开始"
+              end-placeholder="结束"
+              style="width: 240px"
+            />
+            <el-input-number
+              v-else-if="field.fieldType === 'number'"
+              v-model="searchCustom[field.fieldKey]"
+              :controls="false"
+              placeholder="精确匹配"
+              style="width: 140px"
+            />
+            <el-input
+              v-else
+              v-model="searchCustom[field.fieldKey]"
+              placeholder="包含"
+              clearable
+              style="width: 140px"
+              @keyup.enter="handleSearch"
+            />
           </div>
         </ProSearchCard>
 

@@ -7,6 +7,7 @@ package com.platform.execution.dto;
 
 import lombok.Data;
 
+import javax.validation.Valid;
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.Size;
 import java.io.Serializable;
@@ -59,6 +60,12 @@ public class DefectCreateRequest implements Serializable {
      * 初始关联列表
      */
     private List<DefectRelationCreateRequest> relations;
+
+    /**
+     * 初始附件列表
+     */
+    @Valid
+    private List<DefectAttachmentCreateRequest> attachments;
 
     /**
      * 自定义字段值（fieldKey -> 值，由【字段管理】动态配置驱动）

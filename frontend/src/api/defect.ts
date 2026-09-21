@@ -9,7 +9,8 @@ import request from './request'
 
 export function getDefects(projectId: number, params?: {
   groupId?: number; keyword?: string; status?: string; severity?: string;
-  assigneeId?: number; page?: number; pageSize?: number
+  assigneeId?: number; createdAtStart?: string; createdAtEnd?: string; customFilters?: string;
+  page?: number; pageSize?: number
 }) {
   return request.get(`/v1/projects/${projectId}/defects`, { params })
 }

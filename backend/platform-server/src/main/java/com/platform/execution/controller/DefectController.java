@@ -35,9 +35,13 @@ public class DefectController {
                                                            @RequestParam(required = false) String status,
                                                            @RequestParam(required = false) String severity,
                                                            @RequestParam(required = false) Long assigneeId,
+                                                           @RequestParam(required = false) String createdAtStart,
+                                                           @RequestParam(required = false) String createdAtEnd,
+                                                           @RequestParam(required = false) String customFilters,
                                                            @RequestParam(defaultValue = "1") int page,
                                                            @RequestParam(defaultValue = "20") int pageSize) {
-        return ApiResponse.ok(defectService.listDefects(projectId, groupId, keyword, status, severity, assigneeId, page, pageSize));
+        return ApiResponse.ok(defectService.listDefects(projectId, groupId, keyword, status, severity, assigneeId,
+                createdAtStart, createdAtEnd, customFilters, page, pageSize));
     }
 
     /**
@@ -55,7 +59,7 @@ public class DefectController {
     @GetMapping("/{defectId}")
     public ApiResponse<DefectResponse> get(@PathVariable Long projectId,
                                             @PathVariable Long defectId) {
-        return ApiResponse.ok(defectService.getDefect(defectId));
+        return ApiResponse.ok(defectService.getDefect(projectId, defectId));
     }
 
     /**
@@ -65,7 +69,7 @@ public class DefectController {
     public ApiResponse<DefectResponse> update(@PathVariable Long projectId,
                                                @PathVariable Long defectId,
                                                @Valid @RequestBody DefectUpdateRequest request) {
-        return ApiResponse.ok(defectService.updateDefect(defectId, request));
+        return ApiResponse.ok(defectService.updateDefect(projectId, defectId, request));
     }
 
     /**
@@ -74,7 +78,7 @@ public class DefectController {
     @PostMapping("/{defectId}/delete")
     public ApiResponse<Void> delete(@PathVariable Long projectId,
                                      @PathVariable Long defectId) {
-        defectService.deleteDefect(defectId);
+        defectService.deleteDefect(projectId, defectId);
         return ApiResponse.ok();
     }
 
@@ -85,7 +89,7 @@ public class DefectController {
     public ApiResponse<DefectResponse> transition(@PathVariable Long projectId,
                                                    @PathVariable Long defectId,
                                                    @Valid @RequestBody DefectStatusTransitionRequest request) {
-        return ApiResponse.ok(defectService.transitionStatus(defectId, request));
+        return ApiResponse.ok(defectService.transitionStatus(projectId, defectId, request));
     }
 
     /**
@@ -106,7 +110,7 @@ public class DefectController {
     public ApiResponse<DefectRelationResponse> addRelation(@PathVariable Long projectId,
                                                             @PathVariable Long defectId,
                                                             @Valid @RequestBody DefectRelationCreateRequest request) {
-        return ApiResponse.ok(defectService.addRelation(defectId, request));
+        return ApiResponse.ok(defectService.addRelation(projectId, defectId, request));
     }
 
     /**
@@ -116,7 +120,7 @@ public class DefectController {
     public ApiResponse<Void> deleteRelation(@PathVariable Long projectId,
                                              @PathVariable Long defectId,
                                              @PathVariable Long relationId) {
-        defectService.deleteRelation(defectId, relationId);
+        defectService.deleteRelation(projectId, defectId, relationId);
         return ApiResponse.ok();
     }
 
@@ -141,7 +145,7 @@ public class DefectController {
                                                                 @RequestParam String fileName,
                                                                 @RequestParam String fileUrl,
                                                                 @RequestParam(required = false) Long fileSize) {
-        return ApiResponse.ok(defectService.addAttachment(defectId, fileName, fileUrl, fileSize));
+        return ApiResponse.ok(defectService.addAttachment(projectId, defectId, fileName, fileUrl, fileSize));
     }
 
     /**
@@ -151,7 +155,7 @@ public class DefectController {
     public ApiResponse<Void> deleteAttachment(@PathVariable Long projectId,
                                                @PathVariable Long defectId,
                                                @PathVariable Long attachmentId) {
-        defectService.deleteAttachment(defectId, attachmentId);
+        defectService.deleteAttachment(projectId, defectId, attachmentId);
         return ApiResponse.ok();
     }
 }

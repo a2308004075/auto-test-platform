@@ -6,9 +6,11 @@
 <script setup lang="ts">
 /**
  * 高级搜索折叠卡
- * 筛选项与操作按钮分栏；无折叠行时，若默认筛选项超过一行则自动折叠并显示展开按钮
+ * 筛选项与操作按钮分栏，筛选项按每行最多 3 个分排（超出自动换行）；
+ * 无折叠行时，若默认筛选项超过一行则自动折叠并显示展开按钮
  */
-import { ref, computed, useSlots, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, useSlots, onMounted, onBeforeUnmount, Comment, Fragment, Text } from 'vue'
+import type { VNode, FunctionalComponent } from 'vue'
 
 interface Props {
   /** 是否折叠态（默认收起折叠行） */
@@ -36,6 +38,50 @@ const emit = defineEmits<{
 const slots = useSlots()
 const hasCollapse = computed(() => !!slots.collapse)
 const expanded = ref(!props.defaultCollapsed)
+
+// ===== 筛选项分行：一行最多 3 个 =====
+
+/** 每行最多展示的筛选项数量 */
+const FIELDS_PER_ROW = 3
+
+/** 行渲染器：将一行内的筛选项 vnode 平铺渲染（Fragment） */
+const RowRender: FunctionalComponent<{ nodes: VNode[] }> = (rowProps) => rowProps.nodes
+
+/** 是否为真实的筛选项节点（排除注释与空白文本节点） */
+function isRealField(node: VNode): boolean {
+  if (node.type === Comment) return false
+  if (node.type === Text) return String(node.children ?? '').trim() !== ''
+  return true
+}
+
+/** 递归收集插槽 vnode 中的筛选项（展开 Fragment，兼容 v-for 等动态节点） */
+function collectFields(input: unknown, result: VNode[]): void {
+  if (Array.isArray(input)) {
+    input.forEach((item) => collectFields(item, result))
+    return
+  }
+  const node = input as VNode | null | undefined
+  if (!node || typeof node !== 'object') return
+  if (node.type === Fragment) {
+    collectFields(node.children, result)
+    return
+  }
+  if (isRealField(node)) {
+    result.push(node)
+  }
+}
+
+/** 将插槽内容按每行 3 个切分为多行，保证筛选栏一行最多显示 3 个筛选项 */
+function chunkRows(nodes: VNode[] | undefined): VNode[][] {
+  const fields: VNode[] = []
+  collectFields(nodes, fields)
+  const rows: VNode[][] = []
+  for (let i = 0; i < fields.length; i += FIELDS_PER_ROW) {
+    rows.push(fields.slice(i, i + FIELDS_PER_ROW))
+  }
+  return rows
+}
+
 const hasOverflow = ref(false)
 const everHadOverflow = ref(false)
 const fieldsRef = ref<HTMLElement>()
@@ -84,7 +130,9 @@ onBeforeUnmount(() => {
         class="pro-search-fields"
         :class="{ collapsed: !expanded && !hasCollapse }"
       >
-        <slot />
+        <div v-for="(row, idx) in chunkRows(slots.default?.())" :key="idx" class="pro-search-row">
+          <RowRender :nodes="row" />
+        </div>
       </div>
       <div class="pro-search-actions">
         <el-button type="primary" :loading="loading" @click="onSearch">{{ searchText }}</el-button>
@@ -96,7 +144,9 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <div v-show="expanded && hasCollapse" class="pro-search-collapse">
-      <slot name="collapse" />
+      <div v-for="(row, idx) in chunkRows(slots.collapse?.())" :key="idx" class="pro-search-row">
+        <RowRender :nodes="row" />
+      </div>
     </div>
   </div>
 </template>
@@ -116,14 +166,21 @@ onBeforeUnmount(() => {
 }
 .pro-search-fields {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 12px 24px;
+  flex-direction: column;
+  gap: 12px;
   flex: 1;
+  min-width: 0;
 }
 .pro-search-fields.collapsed {
   max-height: 44px;
   overflow: hidden;
+}
+/* 单行容器：一行最多 3 个筛选项，放不下时在行内换行（窄屏优雅降级） */
+.pro-search-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 24px;
 }
 .pro-search-actions {
   display: flex;
@@ -133,9 +190,8 @@ onBeforeUnmount(() => {
 }
 .pro-search-collapse {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 12px 24px;
+  flex-direction: column;
+  gap: 12px;
   border-top: 1px dashed var(--el-border-color-lighter, #f0f0f0);
   padding-top: 16px;
   margin-top: 12px;

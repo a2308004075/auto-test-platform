@@ -33,8 +33,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -75,6 +75,7 @@ public class DefectService {
      */
     public PageResponse<DefectResponse> listDefects(Long projectId, Long groupId, String keyword,
                                                      String status, String severity, Long assigneeId,
+                                                     String createdAtStart, String createdAtEnd, String customFilters,
                                                      int page, int pageSize) {
         projectService.findActiveById(projectId);
 
@@ -103,6 +104,17 @@ public class DefectService {
         if (assigneeId != null) {
             wrapper.eq(Defect::getAssigneeId, assigneeId);
         }
+        // 创建时间范围（yyyy-MM-dd，含边界：起始日 00:00 ≤ createdAt < 结束日次日 00:00）
+        if (StringUtils.hasText(createdAtStart)) {
+            LocalDateTime start = parseFilterDate(createdAtStart);
+            wrapper.ge(start != null, Defect::getCreatedAt, start);
+        }
+        if (StringUtils.hasText(createdAtEnd)) {
+            LocalDateTime end = parseFilterDate(createdAtEnd);
+            wrapper.lt(end != null, Defect::getCreatedAt, end == null ? null : end.plusDays(1));
+        }
+        // 动态字段筛选（【字段管理-编辑缺陷】视图的列作为筛选项）
+        applyCustomFieldFilters(projectId, wrapper, customFilters);
         wrapper.orderByDesc(Defect::getCreatedAt);
 
         Page<Defect> result = defectMapper.selectPage(new Page<>(page, pageSize), wrapper);
@@ -117,6 +129,88 @@ public class DefectService {
             records.add(resp);
         }
         return PageResponse.of(records, result.getTotal(), page, pageSize);
+    }
+
+    /**
+     * 动态字段筛选：解析 JSON（fieldKey -> 值），EXISTS 子查询匹配字段值
+     *
+     * <p>值结构：单值字符串（text 模糊匹配，select/user/environment/number 精确匹配）
+     * 或二元数组 [start, end]（datetime 按天范围，字段值 'yyyy-MM-dd HH:mm' 字典序等价时间序）；
+     * 同一 fieldKey 的值在 create/edit 两视图可能存于不同 fieldId，按 field_key 关联任一命中即可
+     */
+    private void applyCustomFieldFilters(Long projectId, LambdaQueryWrapper<Defect> wrapper, String customFiltersJson) {
+        if (!StringUtils.hasText(customFiltersJson)) {
+            return;
+        }
+        Map<String, Object> filters;
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            filters = mapper.readValue(customFiltersJson,
+                    mapper.getTypeFactory().constructMapType(HashMap.class, String.class, Object.class));
+        } catch (Exception e) {
+            log.warn("解析动态字段筛选 JSON 失败，忽略: {}", customFiltersJson, e);
+            return;
+        }
+        if (filters.isEmpty()) {
+            return;
+        }
+        // 字段定义（fieldKey -> fieldType）：只处理已配置的 fieldKey，防止任意 key 注入查询
+        LambdaQueryWrapper<CustomField> fieldWrapper = new LambdaQueryWrapper<>();
+        fieldWrapper.eq(CustomField::getProjectId, projectId)
+                .eq(CustomField::getModule, "defect")
+                .eq(CustomField::getIsActive, 1);
+        Map<String, String> typeMap = customFieldMapper.selectList(fieldWrapper).stream()
+                .collect(Collectors.toMap(CustomField::getFieldKey, CustomField::getFieldType, (a, b) -> a));
+
+        for (Map.Entry<String, Object> entry : filters.entrySet()) {
+            String fieldKey = entry.getKey();
+            String fieldType = typeMap.get(fieldKey);
+            if (fieldType == null) {
+                continue;
+            }
+            Object value = entry.getValue();
+            String base = "SELECT 1 FROM sys_custom_field_value v JOIN sys_custom_field f ON v.field_id = f.id"
+                    + " WHERE v.module = 'defect' AND v.entity_id = defect.id"
+                    + " AND f.project_id = {0} AND f.field_key = {1}";
+            if (value instanceof List && ((List<?>) value).size() == 2) {
+                // 日期范围 [start, end]（yyyy-MM-dd，含边界）
+                List<?> range = (List<?>) value;
+                String start = range.get(0) == null ? "" : String.valueOf(range.get(0));
+                String end = range.get(1) == null ? "" : String.valueOf(range.get(1));
+                boolean hasStart = StringUtils.hasText(start);
+                boolean hasEnd = StringUtils.hasText(end);
+                if (!hasStart && !hasEnd) {
+                    continue;
+                }
+                if (hasStart && hasEnd) {
+                    wrapper.exists(base + " AND v.field_value >= {2} AND v.field_value <= {3}",
+                            projectId, fieldKey, start.trim() + " 00:00", end.trim() + " 23:59");
+                } else if (hasStart) {
+                    wrapper.exists(base + " AND v.field_value >= {2}",
+                            projectId, fieldKey, start.trim() + " 00:00");
+                } else {
+                    wrapper.exists(base + " AND v.field_value <= {2}",
+                            projectId, fieldKey, end.trim() + " 23:59");
+                }
+            } else if (value != null && StringUtils.hasText(String.valueOf(value))) {
+                String v = String.valueOf(value).trim();
+                if ("text".equals(fieldType)) {
+                    wrapper.exists(base + " AND v.field_value LIKE {2}", projectId, fieldKey, "%" + v + "%");
+                } else {
+                    wrapper.exists(base + " AND v.field_value = {2}", projectId, fieldKey, v);
+                }
+            }
+        }
+    }
+
+    /** 解析筛选日期（yyyy-MM-dd）为当天 00:00；非法格式返回 null（该条件忽略） */
+    private LocalDateTime parseFilterDate(String date) {
+        try {
+            return LocalDate.parse(date.trim()).atStartOfDay();
+        } catch (Exception e) {
+            log.warn("解析筛选日期失败，忽略该条件: {}", date);
+            return null;
+        }
     }
 
     /**
@@ -135,8 +229,8 @@ public class DefectService {
     /**
      * 获取缺陷详情（含嵌套数据）
      */
-    public DefectResponse getDefect(Long defectId) {
-        Defect defect = findById(defectId);
+    public DefectResponse getDefect(Long projectId, Long defectId) {
+        Defect defect = findByIdAndProject(projectId, defectId);
         DefectResponse resp = toListResponse(defect);
         resp.setRelations(loadRelations(defectId));
         resp.setAttachments(loadAttachments(defectId));
@@ -170,6 +264,13 @@ public class DefectService {
             }
         }
 
+        // 保存初始附件
+        if (request.getAttachments() != null) {
+            for (DefectAttachmentCreateRequest a : request.getAttachments()) {
+                addAttachment(projectId, defect.getId(), a.getFileName(), a.getFileUrl(), a.getFileSize());
+            }
+        }
+
         // 保存自定义字段值（由【字段管理】动态配置驱动）
         customFieldValueService.saveValues(projectId, "defect", "create", defect.getId(), request.getCustomFields());
         return toListResponse(defect);
@@ -179,8 +280,8 @@ public class DefectService {
      * 更新缺陷
      */
     @Transactional(rollbackFor = Exception.class)
-    public DefectResponse updateDefect(Long defectId, DefectUpdateRequest request) {
-        Defect defect = findById(defectId);
+    public DefectResponse updateDefect(Long projectId, Long defectId, DefectUpdateRequest request) {
+        Defect defect = findByIdAndProject(projectId, defectId);
         Map<String, String> oldValues = captureSnapshot(defect);
 
         applyUpdate(defect, request);
@@ -207,8 +308,8 @@ public class DefectService {
      * 删除缺陷
      */
     @Transactional(rollbackFor = Exception.class)
-    public void deleteDefect(Long defectId) {
-        Defect defect = findById(defectId);
+    public void deleteDefect(Long projectId, Long defectId) {
+        findByIdAndProject(projectId, defectId);
         // 级联删除子数据
         deleteDefectChildren(defectId);
         defectMapper.deleteById(defectId);
@@ -218,8 +319,8 @@ public class DefectService {
      * 缺陷状态流转
      */
     @Transactional(rollbackFor = Exception.class)
-    public DefectResponse transitionStatus(Long defectId, DefectStatusTransitionRequest request) {
-        Defect defect = findById(defectId);
+    public DefectResponse transitionStatus(Long projectId, Long defectId, DefectStatusTransitionRequest request) {
+        Defect defect = findByIdAndProject(projectId, defectId);
         String targetStatus = request.getTargetStatus();
         // 合法状态优先取【字段管理-编辑缺陷】的"状态"字段配置（按项目），无配置回退内置集合
         if (!loadValidStatuses(defect.getProjectId()).contains(targetStatus)) {
@@ -280,8 +381,8 @@ public class DefectService {
      * 添加关联
      */
     @Transactional(rollbackFor = Exception.class)
-    public DefectRelationResponse addRelation(Long defectId, DefectRelationCreateRequest request) {
-        findById(defectId);
+    public DefectRelationResponse addRelation(Long projectId, Long defectId, DefectRelationCreateRequest request) {
+        findByIdAndProject(projectId, defectId);
         return toRelationResponse(createRelation(defectId, request));
     }
 
@@ -289,8 +390,8 @@ public class DefectService {
      * 删除关联
      */
     @Transactional(rollbackFor = Exception.class)
-    public void deleteRelation(Long defectId, Long relationId) {
-        findById(defectId);
+    public void deleteRelation(Long projectId, Long defectId, Long relationId) {
+        findByIdAndProject(projectId, defectId);
         DefectRelation relation = defectRelationMapper.selectById(relationId);
         defectRelationMapper.deleteById(relationId);
         if (relation != null) {
@@ -302,8 +403,8 @@ public class DefectService {
      * 添加附件记录
      */
     @Transactional(rollbackFor = Exception.class)
-    public DefectAttachmentResponse addAttachment(Long defectId, String fileName, String fileUrl, Long fileSize) {
-        findById(defectId);
+    public DefectAttachmentResponse addAttachment(Long projectId, Long defectId, String fileName, String fileUrl, Long fileSize) {
+        findByIdAndProject(projectId, defectId);
         DefectAttachment attachment = new DefectAttachment();
         attachment.setDefectId(defectId);
         attachment.setFileName(fileName);
@@ -320,8 +421,8 @@ public class DefectService {
      * 删除附件
      */
     @Transactional(rollbackFor = Exception.class)
-    public void deleteAttachment(Long defectId, Long attachmentId) {
-        findById(defectId);
+    public void deleteAttachment(Long projectId, Long defectId, Long attachmentId) {
+        findByIdAndProject(projectId, defectId);
         DefectAttachment attachment = defectAttachmentMapper.selectById(attachmentId);
         defectAttachmentMapper.deleteById(attachmentId);
         if (attachment != null) {
@@ -368,6 +469,15 @@ public class DefectService {
         Defect defect = defectMapper.selectById(defectId);
         if (defect == null) {
             throw new BusinessException(ErrorCode.DEFECT_NOT_FOUND, "缺陷不存在：" + defectId);
+        }
+        return defect;
+    }
+
+    /** 按 ID 查询并校验缺陷归属指定项目（路径 projectId 与缺陷实际归属不一致时拒绝访问） */
+    private Defect findByIdAndProject(Long projectId, Long defectId) {
+        Defect defect = findById(defectId);
+        if (!Objects.equals(defect.getProjectId(), projectId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "缺陷不属于当前项目");
         }
         return defect;
     }
