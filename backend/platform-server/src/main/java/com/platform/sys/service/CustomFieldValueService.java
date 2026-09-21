@@ -34,8 +34,8 @@ import java.util.stream.Collectors;
  * 渲染 DTO 的选项组装（select/user/environment 统一转为 label/value 列表）
  *
  * <p>同一业务实体在 create/edit 两个视图的字段配置可能不同，但同一 fieldKey
- * 的值互通（通过 fieldKey + entityId 定位，而非视图内的 fieldId），
- * 保证新建时填写的值在编辑页仍能回显。
+ * 的值互通（通过 fieldKey + entityId 定位，而非视图内的 fieldId）；
+ * 读取时优先取 edit 视图配置行的值（最新写入位置），create 视图配置仅作存量兜底。
  */
 @Service
 @RequiredArgsConstructor
@@ -126,15 +126,15 @@ public class CustomFieldValueService {
      * 读取业务实体的自定义字段值（跨视图：按 module 查全部字段定义后组装 fieldKey -> value）
      *
      * <p>读取不区分 create/edit 视图：同一 fieldKey 在两个视图配置中的 fieldId 不同，
-     * 但值只需读取一份（优先取 create 视图配置的 fieldId）。
+     * 但值只需读取一份（优先取 edit 视图配置的 fieldId，其为最新值的写入位置；create 仅作存量兜底）。
      */
     public Map<String, String> loadValues(Long projectId, String module, Long entityId) {
-        // 该项目 + 模块下的全部字段（含 create/edit 两视图，is_active=1）
+        // 该项目 + 模块下的全部字段（含 create/edit 两视图，is_active=1；viewType 降序让 edit 优先）
         LambdaQueryWrapper<CustomField> fieldWrapper = new LambdaQueryWrapper<>();
         fieldWrapper.eq(CustomField::getProjectId, projectId)
                 .eq(CustomField::getModule, module)
                 .eq(CustomField::getIsActive, 1)
-                .orderByAsc(CustomField::getViewType);
+                .orderByDesc(CustomField::getViewType);
         List<CustomField> fields = customFieldMapper.selectList(fieldWrapper);
         if (fields.isEmpty()) {
             return new HashMap<>();
@@ -147,7 +147,7 @@ public class CustomFieldValueService {
         Map<Long, String> valueMap = customFieldValueMapper.selectList(valueWrapper).stream()
                 .collect(Collectors.toMap(CustomFieldValue::getFieldId, CustomFieldValue::getFieldValue, (a, b) -> a));
 
-        // fieldKey -> value（同一 fieldKey 多视图配置时取第一个有值的）
+        // fieldKey -> value（fields 已按 viewType 降序，同一 fieldKey 多视图配置时优先取 edit 行的值）
         Map<String, String> result = new HashMap<>();
         for (CustomField field : fields) {
             String value = valueMap.get(field.getId());
@@ -161,7 +161,7 @@ public class CustomFieldValueService {
     /**
      * 批量读取多个业务实体的自定义字段值（列表页用，避免逐条 N+1 查询）
      *
-     * <p>语义与 {@link #loadValues} 一致：跨视图读取，同一 fieldKey 多视图配置时取第一个有值的
+     * <p>语义与 {@link #loadValues} 一致：跨视图读取，同一 fieldKey 多视图配置时优先取 edit 视图行的值
      *
      * @return entityId -> (fieldKey -> value)
      */
@@ -170,12 +170,12 @@ public class CustomFieldValueService {
         if (entityIds == null || entityIds.isEmpty()) {
             return result;
         }
-        // 该项目 + 模块下的全部字段（含 create/edit 两视图，is_active=1；viewType 升序让 create 优先）
+        // 该项目 + 模块下的全部字段（含 create/edit 两视图，is_active=1；viewType 降序让 edit 优先）
         LambdaQueryWrapper<CustomField> fieldWrapper = new LambdaQueryWrapper<>();
         fieldWrapper.eq(CustomField::getProjectId, projectId)
                 .eq(CustomField::getModule, module)
                 .eq(CustomField::getIsActive, 1)
-                .orderByAsc(CustomField::getViewType);
+                .orderByDesc(CustomField::getViewType);
         List<CustomField> fields = customFieldMapper.selectList(fieldWrapper);
         if (fields.isEmpty()) {
             return result;

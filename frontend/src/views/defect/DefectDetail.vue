@@ -1,21 +1,24 @@
 <!--
  @author HXN
  @date 2026-08-30
- @description 缺陷详情视图
+ @description 缺陷新建/详情统一视图
 -->
 <script setup lang="ts">
 /**
- * 缺陷详情（内置查看/编辑模式）
+ * 缺陷统一视图（新建 / 详情同一界面，按路由是否带 defectId 区分模式）
+ * 新建模式（/defects/new）：无编号、状态、创建人、创建时间、删除与右侧评论/变更记录；
+ * 内容直接编辑（无编辑模式按钮），附件与关联本页暂存、随创建一次性提交，保存后返回列表
+ * 详情模式（/defects/:defectId）：内置查看/编辑模式
  * 内容（富文本）：进入编辑模式后修改（取消/保存在内容模块标题行）
- * 缺陷标题：任意模式下点击标题即行内编辑，失焦自动保存
- * 字段信息：无需编辑模式，直接编辑、变更即保存
- * 附件 / 关联：无需编辑模式，直接操作
+ * 缺陷标题：新建时页头直接输入；详情时点击标题行内编辑，失焦自动保存
+ * 字段信息：新建与详情统一使用【字段管理-编辑缺陷】视图配置
+ * 附件 / 关联：新建本页暂存；详情直接操作（增删即时保存）
  */
 import { ref, reactive, onMounted, computed, watch, shallowRef, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  getDefect, updateDefect, deleteDefect, transitionDefectStatus,
+  getDefect, createDefect, updateDefect, deleteDefect, transitionDefectStatus,
   addDefectRelation, deleteDefectRelation,
   addDefectAttachment, deleteDefectAttachment, getDefectGroups
 } from '@/api/defect'
@@ -33,6 +36,8 @@ const route = useRoute()
 const router = useRouter()
 const projectId = computed(() => Number(route.params.id))
 const defectId = computed(() => Number(route.params.defectId))
+/** 新建模式：/defects/new 路由不带 defectId 参数 */
+const isCreate = computed(() => !route.params.defectId)
 const { options: relationTypeOptions } = useDict('defect_relation_type')
 const { options: targetTypeOptions } = useDict('defect_target_type')
 // 状态选项优先读【字段管理-编辑缺陷】的"状态"字段配置（按项目），无配置回退字典
@@ -65,15 +70,19 @@ const userGroups = computed(() => groups.value.filter((g) => g.isSystem !== 1))
 const form = reactive({
   title: '',
   content: '',
+  // 所属分组（仅新建模式使用；详情模式分组变更即保存，不走表单）
+  groupId: null as number | null,
 })
-// 动态字段值（fieldKey -> 值）：详情加载与每次保存后同步自后端
+// 动态字段值（fieldKey -> 值）：新建初始化默认值；详情加载与每次保存后同步自后端
 const fieldValues = ref<Record<string, any>>({})
-// 编辑态动态字段配置（【字段管理】中【缺陷-编辑缺陷】视图）
+// 动态字段配置（新建与详情统一取【字段管理】中【缺陷-编辑缺陷】视图）
 const editFields = ref<any[]>([])
 
-// 关联
+// 关联（新建模式本页暂存随创建提交；详情模式实时增删）
 const relationForm = reactive({ relationType: 'RELATED', targetType: 'AUTO_CASE', targetId: undefined as number | undefined, targetTitle: '' })
 const relationVisible = ref(false)
+// 新建模式待提交关联列表
+const draftRelations = ref<any[]>([])
 // 用例类目标（手动/自动化用例）支持搜索选择，其余类型手动输入
 const isCaseTarget = computed(() => ['MANUAL_CASE', 'AUTO_CASE'].includes(relationForm.targetType))
 const caseSelectVisible = ref(false)
@@ -89,16 +98,24 @@ function handleCaseConfirm(rows: Array<{ id: number; title: string }>) {
   relationForm.targetTitle = rows[0].title
 }
 
-// 附件
+// 附件（新建模式本页暂存随创建提交；详情模式实时增删）
 const attachmentForm = reactive({ fileName: '', fileUrl: '', fileSize: undefined as number | undefined })
 const attachmentVisible = ref(false)
+// 新建模式待提交附件列表
+const draftAttachments = ref<any[]>([])
+/** 附件列表：新建模式为待提交暂存列表，详情模式为后端数据 */
+const attachmentList = computed(() => (isCreate.value ? draftAttachments.value : (detail.value.attachments || [])))
+/** 关联列表：新建模式为待提交暂存列表，详情模式为后端数据 */
+const relationList = computed(() => (isCreate.value ? draftRelations.value : (detail.value.relations || [])))
 
 // WangEditor（查看态只读；defaultConfig 仅创建时生效，切换编辑态用 enable/disable）
 const editorRef = shallowRef<any>(null)
 // 内容全屏状态（全屏时「退出全屏」按钮浮动于编辑器上方）
 const isFullscreen = ref(false)
 const editorConfig = {
-  readOnly: true,
+  // 新建模式内容直接编辑；详情模式查看态只读，进入编辑态用 enable/disable 切换
+  readOnly: !isCreate.value,
+  placeholder: '请输入缺陷内容...',
   // Toolbar 组件直接以本对象为工具栏配置（读取顶层 excludeKeys）：全屏按钮已移至「内容」标题旁，工具栏不再内置
   excludeKeys: ['fullScreen'],
   MENU_CONF: {
@@ -120,10 +137,10 @@ function toggleFullscreen() {
   else editor.fullScreen()
 }
 
-// 编辑器内容绑定：查看态展示详情内容，编辑态读写表单内容
+// 编辑器内容绑定：新建模式直接读写表单；详情模式查看态展示详情内容，编辑态读写表单内容
 const contentModel = computed({
-  get: () => (editing.value ? form.content : (detail.value.content || '')),
-  set: (val: string) => { if (editing.value) form.content = val },
+  get: () => (isCreate.value || editing.value ? form.content : (detail.value.content || '')),
+  set: (val: string) => { if (isCreate.value || editing.value) form.content = val },
 })
 
 watch(editing, (val) => {
@@ -255,7 +272,7 @@ async function fetchGroups() {
   } catch { groups.value = [] }
 }
 
-/** 编辑态动态字段配置（与旧编辑页一致：取【缺陷-编辑缺陷】视图） */
+/** 动态字段配置（新建与详情统一取【缺陷-编辑缺陷】视图；新建模式初始化字段默认值） */
 async function fetchEditFields() {
   try {
     const res: any = await getCustomFieldsForRender({
@@ -265,6 +282,16 @@ async function fetchEditFields() {
     })
     // 状态字段（defect_status）仅作为流转下拉框的选项来源，不进字段信息区渲染（其值走 defect.status，不走自定义字段值）
     editFields.value = (res.data || []).filter((f: any) => f.fieldKey !== 'defect_status')
+    // 新建模式：初始化字段默认值（详情模式由后端回填值，无需默认值）
+    if (isCreate.value) {
+      for (const field of editFields.value) {
+        if (field.defaultValue !== null && field.defaultValue !== undefined && field.defaultValue !== '') {
+          if (fieldValues.value[field.fieldKey] === undefined) {
+            fieldValues.value[field.fieldKey] = field.defaultValue
+          }
+        }
+      }
+    }
   } catch { editFields.value = [] }
 }
 
@@ -330,8 +357,40 @@ async function handleSave() {
   }
 }
 
-/** 字段信息直接编辑：动态字段变更即保存 */
+/** 新建模式：整单提交创建（附件/关联随创建一并提交），成功后返回缺陷列表 */
+async function handleCreate() {
+  if (!form.title.trim()) {
+    ElMessage.warning('请输入缺陷标题')
+    return
+  }
+  saving.value = true
+  try {
+    await createDefect(projectId.value, {
+      groupId: form.groupId,
+      title: form.title,
+      content: form.content,
+      customFields: { ...fieldValues.value },
+      // 待提交附件/关联列表（本页暂存，随创建一并保存）
+      attachments: draftAttachments.value,
+      relations: draftRelations.value,
+    })
+    ElMessage.success('创建成功')
+    router.push(`/project/${projectId.value}/defects`)
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+/** 新建模式：取消并返回缺陷列表 */
+function handleCancel() {
+  router.push(`/project/${projectId.value}/defects`)
+}
+
+/** 字段信息直接编辑：动态字段变更即保存（新建模式值走表单，无需即时保存） */
 async function handleFieldSave() {
+  if (isCreate.value) return
   const payload: any = { customFields: { ...fieldValues.value } }
   try {
     await updateDefect(projectId.value, defectId.value, payload)
@@ -388,6 +447,22 @@ async function handleAddRelation() {
     ElMessage.warning(isCaseTarget.value ? '请选择关联的用例' : '请输入关联目标 ID')
     return
   }
+  // 新建模式：暂存到待提交列表（用例类目标本地防重复，与后端校验一致）
+  if (isCreate.value) {
+    if (isCaseTarget.value && draftRelations.value.some((r) => r.targetType === relationForm.targetType && r.targetId === relationForm.targetId)) {
+      ElMessage.warning('该用例已添加，请勿重复添加')
+      return
+    }
+    draftRelations.value.push({
+      relationType: relationForm.relationType,
+      targetType: relationForm.targetType,
+      targetId: relationForm.targetId,
+      targetTitle: relationForm.targetTitle,
+    })
+    relationVisible.value = false
+    Object.assign(relationForm, { relationType: 'RELATED', targetType: 'AUTO_CASE', targetId: undefined, targetTitle: '' })
+    return
+  }
   try {
     await addDefectRelation(projectId.value, defectId.value, relationForm)
     ElMessage.success('添加成功')
@@ -397,9 +472,14 @@ async function handleAddRelation() {
   } catch (e: any) { ElMessage.error(e?.response?.data?.message || '添加失败') }
 }
 
-async function handleDeleteRelation(id: number) {
+/** 删除关联：新建模式移除暂存项；详情模式调后端删除 */
+async function handleDeleteRelation(row: any, index: number) {
+  if (isCreate.value) {
+    draftRelations.value.splice(index, 1)
+    return
+  }
   try {
-    await deleteDefectRelation(projectId.value, defectId.value, id)
+    await deleteDefectRelation(projectId.value, defectId.value, row.id)
     ElMessage.success('删除成功')
     fetchDetail()
   } catch { ElMessage.error('删除失败') }
@@ -408,6 +488,17 @@ async function handleDeleteRelation(id: number) {
 // 附件
 async function handleAddAttachment() {
   if (!attachmentForm.fileName || !attachmentForm.fileUrl) { ElMessage.warning('请填写文件名和链接'); return }
+  // 新建模式：暂存到待提交列表，随创建一并提交
+  if (isCreate.value) {
+    draftAttachments.value.push({
+      fileName: attachmentForm.fileName,
+      fileUrl: attachmentForm.fileUrl,
+      fileSize: attachmentForm.fileSize,
+    })
+    attachmentVisible.value = false
+    Object.assign(attachmentForm, { fileName: '', fileUrl: '', fileSize: undefined })
+    return
+  }
   try {
     await addDefectAttachment(projectId.value, defectId.value, {
       fileName: attachmentForm.fileName,
@@ -421,9 +512,14 @@ async function handleAddAttachment() {
   } catch (e: any) { ElMessage.error(e?.response?.data?.message || '添加失败') }
 }
 
-async function handleDeleteAttachment(id: number) {
+/** 删除附件：新建模式移除暂存项；详情模式调后端删除 */
+async function handleDeleteAttachment(row: any, index: number) {
+  if (isCreate.value) {
+    draftAttachments.value.splice(index, 1)
+    return
+  }
   try {
-    await deleteDefectAttachment(projectId.value, defectId.value, id)
+    await deleteDefectAttachment(projectId.value, defectId.value, row.id)
     ElMessage.success('删除成功')
     fetchDetail()
   } catch { ElMessage.error('删除失败') }
@@ -434,19 +530,27 @@ function openFile(url: string) {
 }
 
 onMounted(() => {
-  fetchDetail()
   fetchGroups()
   fetchEditFields()
+  // 新建模式无详情可拉取（附件/关联为本页暂存）
+  if (!isCreate.value) fetchDetail()
 })
 </script>
 
 <template>
   <div class="defect-detail-page">
-    <PageHeader :title="detail.defectNo || '缺陷详情'">
-      <!-- 编号右侧：标题（查看态文本 / 编辑态输入框） -->
+    <PageHeader :title="isCreate ? '新建缺陷' : (detail.defectNo || '缺陷详情')">
+      <!-- 新建模式：常驻标题输入框；详情模式：查看态文本 / 编辑态输入框（位置一致） -->
       <template #title-suffix>
         <el-input
-          v-if="titleEditing"
+          v-if="isCreate"
+          v-model="form.title"
+          class="header-title-input"
+          placeholder="请输入缺陷标题"
+          maxlength="500"
+        />
+        <el-input
+          v-else-if="titleEditing"
           ref="titleInputRef"
           v-model="form.title"
           class="header-title-input"
@@ -462,10 +566,14 @@ onMounted(() => {
           @click="startTitleEdit"
         >{{ detail.title }}</span>
       </template>
-      <!-- 返回上一页：导航操作，任意模式下均可用 -->
-      <el-button @click="handleBack">返回</el-button>
-      <template v-if="!editing">
-        <el-button type="danger" @click="handleDelete">删除</el-button>
+      <!-- 新建模式：取消/保存；详情模式：返回 + 删除 -->
+      <template v-if="isCreate">
+        <el-button @click="handleCancel">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="handleCreate">保存</el-button>
+      </template>
+      <template v-else>
+        <el-button @click="handleBack">返回</el-button>
+        <el-button v-if="!editing" type="danger" @click="handleDelete">删除</el-button>
       </template>
     </PageHeader>
 
@@ -473,7 +581,8 @@ onMounted(() => {
       <!-- 左侧主信息 -->
       <div v-loading="loading" class="detail-main">
         <div class="detail-card">
-          <div class="detail-header">
+          <!-- 创建人/创建时间/状态：仅详情模式展示 -->
+          <div v-if="!isCreate" class="detail-header">
             <div class="detail-meta">
               <span class="meta-item">创建人：{{ detail.createdByName || '-' }}</span>
               <span class="meta-item">创建时间：{{ detail.createdAt }}</span>
@@ -490,7 +599,7 @@ onMounted(() => {
             </div>
           </div>
 
-          <!-- 内容（编辑态可编辑，编辑/取消/保存在本模块标题行；标题在页头编号右侧编辑） -->
+          <!-- 内容（新建模式直接编辑无编辑按钮；详情模式编辑/取消/保存在本模块标题行，标题在页头编辑） -->
           <div class="detail-block">
             <div class="block-title">
               <span class="block-title-left">
@@ -502,7 +611,7 @@ onMounted(() => {
                   @click="toggleFullscreen"
                 >{{ isFullscreen ? '退出全屏' : '全屏' }}</el-button>
               </span>
-              <div class="detail-actions">
+              <div v-if="!isCreate" class="detail-actions">
                 <template v-if="editing">
                   <el-button @click="handleCancelEdit">取消</el-button>
                   <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
@@ -511,8 +620,8 @@ onMounted(() => {
               </div>
             </div>
             <div class="editor-wrapper">
-              <!-- 工具栏仅编辑模式显示；v-show 保持 DOM 以兼容全屏（工具栏与编辑区需同父级） -->
-              <Toolbar v-show="editing" :editor="editorRef" :default-config="editorConfig" mode="default" style="border-bottom: 1px solid #ccc" />
+              <!-- 工具栏仅编辑模式显示（新建模式可直接编辑）；v-show 保持 DOM 以兼容全屏（工具栏与编辑区需同父级） -->
+              <Toolbar v-show="isCreate || editing" :editor="editorRef" :default-config="editorConfig" mode="default" style="border-bottom: 1px solid #ccc" />
               <Editor v-model="contentModel" :default-config="editorConfig" mode="default" style="height: 400px; overflow-y: hidden" @on-created="onEditorCreated" />
             </div>
           </div>
@@ -523,14 +632,14 @@ onMounted(() => {
             <div class="tab-toolbar">
               <el-button type="primary" size="small" @click="attachmentVisible = true">添加附件</el-button>
             </div>
-            <el-table :data="detail.attachments || []" border stripe>
+            <el-table :data="attachmentList" border stripe>
               <el-table-column prop="fileName" label="文件名" />
               <el-table-column prop="fileSize" label="大小（字节）" width="130" />
-              <el-table-column prop="createdByName" label="上传人" width="120" />
+              <el-table-column v-if="!isCreate" prop="createdByName" label="上传人" width="120" />
               <el-table-column label="操作" width="140">
-                <template #default="{ row }">
+                <template #default="{ row, $index }">
                   <el-button type="primary" link size="small" @click="openFile(row.fileUrl)">下载</el-button>
-                  <el-button type="danger" link size="small" @click="handleDeleteAttachment(row.id)">删除</el-button>
+                  <el-button type="danger" link size="small" @click="handleDeleteAttachment(row, $index)">删除</el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -549,19 +658,27 @@ onMounted(() => {
               >
                 <template #prepend>
                   <el-form-item label="所属分组">
-                    <el-select :model-value="detail.groupId ?? null" placeholder="未分组" clearable filterable style="width: 100%" @change="handleGroupChange">
+                    <!-- 新建模式：值随表单提交；详情模式：变更即保存 -->
+                    <el-select v-if="isCreate" v-model="form.groupId" placeholder="未分组" clearable filterable style="width: 100%">
+                      <el-option v-for="g in userGroups" :key="g.id" :value="g.id" :label="g.name" />
+                    </el-select>
+                    <el-select v-else :model-value="detail.groupId ?? null" placeholder="未分组" clearable filterable style="width: 100%" @change="handleGroupChange">
                       <el-option v-for="g in userGroups" :key="g.id" :value="g.id" :label="g.name" />
                     </el-select>
                   </el-form-item>
                 </template>
               </DynamicFieldGrid>
               <el-form-item v-else label="所属分组">
-                <el-select :model-value="detail.groupId ?? null" placeholder="未分组" clearable filterable style="width: 100%" @change="handleGroupChange">
+                <el-select v-if="isCreate" v-model="form.groupId" placeholder="未分组" clearable filterable style="width: 100%">
+                  <el-option v-for="g in userGroups" :key="g.id" :value="g.id" :label="g.name" />
+                </el-select>
+                <el-select v-else :model-value="detail.groupId ?? null" placeholder="未分组" clearable filterable style="width: 100%" @change="handleGroupChange">
                   <el-option v-for="g in userGroups" :key="g.id" :value="g.id" :label="g.name" />
                 </el-select>
               </el-form-item>
             </el-form>
-            <div class="field-item"><span class="field-label">重新打开次数：</span><span>{{ detail.reopenCount ?? 0 }}</span></div>
+            <!-- 重新打开次数：仅详情模式展示 -->
+            <div v-if="!isCreate" class="field-item"><span class="field-label">重新打开次数：</span><span>{{ detail.reopenCount ?? 0 }}</span></div>
           </div>
 
           <!-- 关联 -->
@@ -570,7 +687,7 @@ onMounted(() => {
             <div class="tab-toolbar">
               <el-button type="primary" size="small" @click="relationVisible = true">添加关联</el-button>
             </div>
-            <el-table :data="detail.relations || []" border stripe>
+            <el-table :data="relationList" border stripe>
               <el-table-column label="关联类型" width="120">
                 <template #default="{ row }">{{ relationTypeLabelMap[row.relationType] || row.relationType }}</template>
               </el-table-column>
@@ -580,8 +697,8 @@ onMounted(() => {
               <el-table-column prop="targetId" label="目标 ID" width="100" />
               <el-table-column prop="targetTitle" label="目标标题" />
               <el-table-column label="操作" width="80">
-                <template #default="{ row }">
-                  <el-button type="danger" link size="small" @click="handleDeleteRelation(row.id)">删除</el-button>
+                <template #default="{ row, $index }">
+                  <el-button type="danger" link size="small" @click="handleDeleteRelation(row, $index)">删除</el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -590,8 +707,8 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 右侧：评论 / 变更记录 -->
-      <div class="detail-side">
+      <!-- 右侧：评论 / 变更记录（仅详情模式） -->
+      <div v-if="!isCreate" class="detail-side">
         <el-tabs v-model="sideTab" type="card" class="side-tabs">
           <el-tab-pane label="评论" name="comments">
             <CommentPanel biz-type="DEFECT" :biz-id="defectId" />
@@ -780,7 +897,9 @@ onMounted(() => {
   padding-top: 20px;
   border-top: 1px solid #ebeef5;
 }
-.detail-header + .detail-block {
+/* 首个区块无上分隔线：详情模式紧跟页头信息区；新建模式无信息区（区块为卡片首子元素） */
+.detail-header + .detail-block,
+.detail-card > .detail-block:first-child {
   margin-top: 0;
   padding-top: 0;
   border-top: none;

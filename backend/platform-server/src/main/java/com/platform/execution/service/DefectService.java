@@ -271,8 +271,8 @@ public class DefectService {
             }
         }
 
-        // 保存自定义字段值（由【字段管理】动态配置驱动）
-        customFieldValueService.saveValues(projectId, "defect", "create", defect.getId(), request.getCustomFields());
+        // 保存自定义字段值（新建/详情统一使用【字段管理-编辑缺陷】视图配置）
+        customFieldValueService.saveValues(projectId, "defect", "edit", defect.getId(), request.getCustomFields());
         return toListResponse(defect);
     }
 

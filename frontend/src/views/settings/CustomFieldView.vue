@@ -6,7 +6,7 @@
 <script setup lang="ts">
 /**
  * 字段管理页面（仅 ADMIN）
- * 左侧层级树：项目（当前项目）→ 模块（固定 缺陷/需求）→ 视图（固定 新建/编辑）；
+ * 左侧层级树：项目（当前项目）→ 模块（固定 缺陷/需求）→ 视图（缺陷：新建/详情统一“编辑缺陷”视图；需求：新建/编辑）；
  * 只允许在视图层级（叶子节点）编辑字段；右侧字段列表，新增/编辑通过弹窗填写
  */
 import { ref, reactive, computed, watch, nextTick, onBeforeUnmount } from 'vue'
@@ -43,7 +43,7 @@ const moduleTree: ModuleNode[] = [
     label: '缺陷',
     module: 'defect',
     views: [
-      { label: '新建缺陷', viewType: 'create' },
+      // 新建缺陷与缺陷详情为同一套字段（统一视图），仅保留“编辑缺陷”视图节点
       { label: '编辑缺陷', viewType: 'edit' },
     ],
   },
@@ -88,7 +88,7 @@ const viewReady = computed(
 
 const placeholderText = computed(() => {
   if (!hasCurrentProject.value) return '请先从首页进入项目，再使用字段管理'
-  return '请在左侧选择具体视图（如"新建缺陷"）'
+  return '请在左侧选择具体视图（如"编辑缺陷"）'
 })
 
 const fieldTypeOptions = [

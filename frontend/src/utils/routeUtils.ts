@@ -141,8 +141,8 @@ export function addSupplementaryRoutes(router: Router, layoutName: string): void
     { path: 'project/:id/manual-cases/new',          component: 'manualcase/ManualCaseEdit', title: '新建手动化用例' },
     { path: 'project/:id/manual-cases/:caseId/edit', component: 'manualcase/ManualCaseEdit', title: '编辑手动化用例' },
 
-    // ===== 缺陷管理模块（详情页内置查看/编辑模式，无独立编辑页） =====
-    { path: 'project/:id/defects/new',              component: 'defect/DefectEdit',   title: '新建缺陷' },
+    // ===== 缺陷管理模块（新建/详情统一视图 DefectDetail：无 defectId 为新建模式，有则为详情模式） =====
+    { path: 'project/:id/defects/new',              component: 'defect/DefectDetail', title: '新建缺陷' },
     { path: 'project/:id/defects/:defectId',         component: 'defect/DefectDetail', title: '缺陷详情' },
 
     // ===== 测试计划/执行模块 =====

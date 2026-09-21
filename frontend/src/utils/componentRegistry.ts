@@ -63,9 +63,8 @@ export const componentMap: Record<string, () => Promise<any>> = {
   'manualcase/ManualCaseList': () => import('@/views/manualcase/ManualCaseList.vue'),
   'manualcase/ManualCaseEdit': () => import('@/views/manualcase/ManualCaseEdit.vue'),
 
-  // ===== 缺陷管理模块 =====
+  // ===== 缺陷管理模块（新建/详情统一 DefectDetail 组件） =====
   'defect/DefectList': () => import('@/views/defect/DefectList.vue'),
-  'defect/DefectEdit': () => import('@/views/defect/DefectEdit.vue'),
   'defect/DefectDetail': () => import('@/views/defect/DefectDetail.vue'),
 
   // ===== AI 渗透测试模块 =====
