@@ -38,7 +38,7 @@ public class CustomFieldCreateRequest {
     private String viewType;
 
     /**
-     * 显示标签
+     * 显示标签（同一项目 + 模块 + 视图内不可重复）
      */
     @NotBlank(message = "字段标签不能为空")
     private String fieldLabel;

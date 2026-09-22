@@ -156,6 +156,9 @@ watch(editing, (val) => {
   else editor.disable()
 })
 
+/** 「状态」必填标记：取【字段管理-缺陷字段】配置的 isRequired（系统预置为 1），页头状态区据此显示红星 */
+const statusRequired = ref(false)
+
 const statusLabelMap = computed(() => {
   const map: Record<string, string> = {}
   statusOptions.value.forEach((o) => { map[o.value] = o.label })
@@ -258,6 +261,12 @@ function formatHistoryTime(time: string | null | undefined): string {
   return time.replace('T', ' ').substring(0, 16)
 }
 
+/** 创建时间：展示到秒（yyyy-MM-dd HH:mm:ss） */
+function formatDateTime(time: string | null | undefined): string {
+  if (!time) return '-'
+  return time.replace('T', ' ').substring(0, 19)
+}
+
 async function fetchDetail() {
   loading.value = true
   try {
@@ -286,8 +295,11 @@ async function fetchEditFields() {
       module: 'defect',
       viewType: 'edit',
     })
+    const fields: any[] = res.data || []
+    // 「状态」必填标记：取字段管理配置（系统预置必填），页头状态区据此显示红星
+    statusRequired.value = fields.find((f: any) => f.fieldKey === 'defect_status')?.isRequired === 1
     // 状态字段（defect_status）仅作为流转下拉框的选项来源，不进字段信息区渲染（其值走 defect.status，不走自定义字段值）
-    editFields.value = (res.data || []).filter((f: any) => f.fieldKey !== 'defect_status')
+    editFields.value = fields.filter((f: any) => f.fieldKey !== 'defect_status')
     // 新建模式：初始化可见字段默认值（详情模式由后端回填值，无需默认值）
     if (isCreate.value) {
       for (const field of visibleEditFields.value) {
@@ -591,8 +603,11 @@ onMounted(() => {
           <div v-if="!isCreate" class="detail-header">
             <div class="detail-meta">
               <span class="meta-item">创建人：{{ detail.createdByName || '-' }}</span>
-              <span class="meta-item">创建时间：{{ detail.createdAt }}</span>
+              <span class="meta-item">创建时间：{{ formatDateTime(detail.createdAt) }}</span>
+              <span class="meta-item">重新打开次数：{{ detail.reopenCount ?? 0 }}</span>
               <div v-if="!editing" class="meta-status-group">
+                <!-- 必填标记：「状态」在【字段管理】中配置为必填时显示红星 -->
+                <span v-if="statusRequired" class="meta-asterisk">*</span>
                 <span class="meta-item">状态：</span>
                 <el-select
                   :model-value="detail.status"
@@ -683,8 +698,6 @@ onMounted(() => {
                 </el-select>
               </el-form-item>
             </el-form>
-            <!-- 重新打开次数：仅详情模式展示 -->
-            <div v-if="!isCreate" class="field-item"><span class="field-label">重新打开次数：</span><span>{{ detail.reopenCount ?? 0 }}</span></div>
           </div>
 
           <!-- 关联 -->
@@ -971,6 +984,11 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
 }
+/* 必填星号（「状态」在【字段管理】中配置为必填时显示，样式对齐 Element Plus 必填标记） */
+.meta-asterisk {
+  color: var(--el-color-danger);
+  margin-right: -4px;
+}
 .editor-wrapper {
   border: 1px solid #ccc;
   border-radius: 4px;
@@ -985,20 +1003,6 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 16px 32px;
-}
-.field-item {
-  display: flex;
-  font-size: 14px;
-  color: #606266;
-}
-/* 多行文本字段值保留换行展示 */
-.field-item > span:last-child {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.field-label {
-  color: #909399;
-  min-width: 100px;
 }
 .tab-toolbar {
   margin-bottom: 12px;

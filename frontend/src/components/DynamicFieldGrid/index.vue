@@ -9,7 +9,7 @@
  *
  * 根据 fields 配置渲染对应的表单控件：
  * - text -> el-input（单行）
- * - textarea -> el-input type="textarea"（跨整行，3 行）
+ * - textarea -> el-input type="textarea"（跨整行，3 行，最多 200 字符）
  * - select / user / environment -> el-select（选项统一来自后端组装的 field.options；
  *   select 兼容解析 optionsJson）
  * - datetime -> el-date-picker type="datetime"
@@ -93,11 +93,13 @@ function updateFieldValue(fieldKey: string, val: any) {
         @change="emit('field-change', field.fieldKey)"
       />
 
-      <!-- 多行文本（跨整行，3 行） -->
+      <!-- 多行文本（跨整行，3 行；最多输入 200 个字符） -->
       <el-input
         v-else-if="field.fieldType === 'textarea'"
         type="textarea"
         :rows="3"
+        maxlength="200"
+        show-word-limit
         :model-value="modelValue[field.fieldKey] ?? ''"
         :placeholder="`请输入${field.fieldLabel}`"
         @update:model-value="updateFieldValue(field.fieldKey, $event)"

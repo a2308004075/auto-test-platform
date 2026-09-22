@@ -69,13 +69,18 @@ public class CustomFieldService {
     public static final String DEFECT_STATUS_FIELD_KEY = "defect_status";
 
     /**
+     * "状态"字段固定显示位置：仅缺陷详情（系统预置，不可修改）
+     */
+    private static final String DEFECT_STATUS_DISPLAY_SCOPE = "detail";
+
+    /**
      * 新建项目时预置的状态选项（value 与 defect.status 现有英文编码一致，存量数据无需迁移）
      */
     private static final String DEFAULT_DEFECT_STATUS_OPTIONS_JSON =
             "[{\"label\":\"新建\",\"value\":\"NEW\"},{\"label\":\"待确认\",\"value\":\"TO_CONFIRM\"},{\"label\":\"修复中\",\"value\":\"FIXING\"},{\"label\":\"待部署\",\"value\":\"TO_DEPLOY\"},{\"label\":\"待验证\",\"value\":\"PENDING\"},{\"label\":\"已修复\",\"value\":\"COMPLETED\"},{\"label\":\"重新打开\",\"value\":\"REOPENED\"},{\"label\":\"延期修复\",\"value\":\"DEFERRED\"},{\"label\":\"无需修复\",\"value\":\"CLOSED\"}]";
 
     /**
-     * 管理页列表（按 sortNo 排序）
+     * 管理页列表（按 sortNo 排序；"状态"系统字段固定排第一位）
      */
     public List<CustomFieldListItem> listByConfig(Long projectId, String module, String viewType) {
         LambdaQueryWrapper<CustomField> wrapper = new LambdaQueryWrapper<>();
@@ -91,7 +96,11 @@ public class CustomFieldService {
         wrapper.orderByAsc(CustomField::getSortNo)
                 .orderByAsc(CustomField::getId);
         List<CustomField> fields = customFieldMapper.selectList(wrapper);
-        return fields.stream().map(this::toListItem).collect(Collectors.toList());
+        // "状态"字段位置不可修改：展示时固定提到第一位（其余字段保持原相对顺序）
+        List<CustomField> ordered = new ArrayList<>();
+        fields.stream().filter(f -> DEFECT_STATUS_FIELD_KEY.equals(f.getFieldKey())).forEach(ordered::add);
+        fields.stream().filter(f -> !DEFECT_STATUS_FIELD_KEY.equals(f.getFieldKey())).forEach(ordered::add);
+        return ordered.stream().map(this::toListItem).collect(Collectors.toList());
     }
 
     /**
@@ -117,6 +126,7 @@ public class CustomFieldService {
     @Transactional(rollbackFor = Exception.class)
     public CustomFieldListItem create(CustomFieldCreateRequest request) {
         validateFieldType(request);
+        validateFieldLabelUnique(request, null);
 
         CustomField field = new CustomField();
         BeanUtils.copyProperties(request, field);
@@ -145,12 +155,22 @@ public class CustomFieldService {
         if (field == null) {
             throw new BusinessException(ErrorCode.CUSTOM_FIELD_NOT_FOUND, "字段不存在");
         }
+        validateFieldLabelUnique(request, id);
 
+        // 排序值仅由拖拽排序接口（sort）专职管理：忽略请求携带的值，防止旧页面用陈旧值覆盖
+        Integer originalSortNo = field.getSortNo();
         BeanUtils.copyProperties(request, field);
+        field.setSortNo(originalSortNo);
         // displayScope 需手动转换（类型不匹配不会被复制）；请求缺省（null/空）时保持原值不动
         List<String> scopes = request.getDisplayScope();
         if (scopes != null && !scopes.isEmpty()) {
             field.setDisplayScope(joinDisplayScopes(scopes));
+        }
+        // "状态"系统字段：必填固定为"是"、显示位置固定为"缺陷详情"，不可被修改
+        // （请求值一律忽略，置于 displayScope 转换之后确保覆盖请求值）
+        if (DEFECT_STATUS_FIELD_KEY.equals(field.getFieldKey())) {
+            field.setIsRequired(1);
+            field.setDisplayScope(DEFECT_STATUS_DISPLAY_SCOPE);
         }
         customFieldMapper.updateById(field);
         return toListItem(field);
@@ -173,9 +193,11 @@ public class CustomFieldService {
         field.setDescription("缺陷流转状态下拉框的枚举选项：可增删选项、修改显示名、调整顺序；删除选项后存量缺陷保留原状态值");
         field.setFieldType("select");
         field.setOptionsJson(DEFAULT_DEFECT_STATUS_OPTIONS_JSON);
-        field.setIsRequired(0);
-        field.setDisplayScope(DEFAULT_DISPLAY_SCOPE);
-        field.setSortNo(99);
+        // "状态"字段系统预置为必填、显示位置固定为"缺陷详情"，均不可修改
+        field.setIsRequired(1);
+        field.setDisplayScope(DEFECT_STATUS_DISPLAY_SCOPE);
+        // "状态"字段固定排第一位（列表展示与拖拽均锁定位置）
+        field.setSortNo(1);
         field.setIsActive(1);
         customFieldMapper.insert(field);
     }
@@ -242,6 +264,14 @@ public class CustomFieldService {
         // 按传入顺序重写 sortNo 为连续序号（仅更新 sortNo 有变化的行）
         Map<Long, CustomField> fieldMap = fields.stream()
                 .collect(Collectors.toMap(CustomField::getId, f -> f));
+
+        // "状态"字段位置不可修改：配置中存在状态字段时，其必须位于提交顺序的第一位
+        boolean hasStatusField = fields.stream()
+                .anyMatch(f -> DEFECT_STATUS_FIELD_KEY.equals(f.getFieldKey()));
+        if (hasStatusField && !DEFECT_STATUS_FIELD_KEY.equals(fieldMap.get(orderedIds.get(0)).getFieldKey())) {
+            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "「状态」字段固定排第一位，不能调整其位置");
+        }
+
         for (int i = 0; i < orderedIds.size(); i++) {
             CustomField item = fieldMap.get(orderedIds.get(i));
             int newSortNo = i + 1;
@@ -269,6 +299,35 @@ public class CustomFieldService {
                             "不支持的显示位置：" + scope);
                 }
             }
+        }
+    }
+
+    /**
+     * 字段标签唯一性校验：同一配置（项目 + 模块 + 视图）内不可重复
+     *
+     * <p>编辑时排除自身（excludeId）；已删除字段（@TableLogic）不参与校验，
+     * 其标签可被新字段复用；比较前去除首尾空格，库表排序规则为大小写不敏感（utf8mb4_unicode_ci）
+     *
+     * @param excludeId 需排除的字段 ID（编辑场景传当前字段 ID，新建场景传 null）
+     */
+    private void validateFieldLabelUnique(CustomFieldCreateRequest request, Long excludeId) {
+        String label = request.getFieldLabel() == null ? "" : request.getFieldLabel().trim();
+        if (label.isEmpty()) {
+            // 非空由 DTO 的 @NotBlank 保证，此处仅兜底
+            return;
+        }
+        LambdaQueryWrapper<CustomField> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(CustomField::getProjectId, request.getProjectId())
+                .eq(CustomField::getModule, request.getModule())
+                .eq(CustomField::getViewType, request.getViewType())
+                .eq(CustomField::getFieldLabel, label);
+        if (excludeId != null) {
+            wrapper.ne(CustomField::getId, excludeId);
+        }
+        Long count = customFieldMapper.selectCount(wrapper);
+        if (count != null && count > 0) {
+            throw new BusinessException(ErrorCode.CUSTOM_FIELD_LABEL_DUPLICATE,
+                    "字段标签「" + label + "」已存在");
         }
     }
 

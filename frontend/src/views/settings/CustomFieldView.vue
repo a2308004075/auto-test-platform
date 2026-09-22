@@ -12,7 +12,7 @@
  */
 import { ref, reactive, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CaretRight, Rank } from '@element-plus/icons-vue'
+import { CaretRight, Lock, Rank } from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
 import { getCustomFields, createCustomField, updateCustomField, sortCustomFields, deleteCustomField } from '@/api/customField'
 import { useProjectStore } from '@/stores'
@@ -89,11 +89,11 @@ const displayScopeOptions = computed(() => [
   { label: `${moduleShortName.value}详情`, value: 'detail' },
 ])
 
-/** 列表"显示位置"标签：双值=都显示；单值=仅新建X显示 / 仅X详情显示 */
+/** 列表"显示位置"标签：双值=都显示；单值=新建X / X详情 */
 function scopeLabel(scope: unknown): string {
   const list = toScopeList(scope)
   if (list.includes('create') && list.includes('detail')) return '都显示'
-  return list.includes('create') ? `仅新建${moduleShortName.value}显示` : `仅${moduleShortName.value}详情显示`
+  return list.includes('create') ? `新建${moduleShortName.value}` : `${moduleShortName.value}详情`
 }
 
 /** 列表"显示位置"标签颜色：新建=warning 详情=success 都显示=info */
@@ -119,17 +119,30 @@ const form = reactive({
   fieldType: 'text',
   description: '',
   optionsJson: '',
-  // 默认值 / 排序号已从弹窗表单移除（排序改由列表拖拽调整）：
-  // 仅保留属性用于编辑时回填原值随提交带回，避免被覆盖
+  // 默认值 / 排序号已从弹窗表单移除（排序改由列表拖拽调整，后端更新接口会忽略请求中的排序值）：
+  // 仅保留属性用于编辑时回填原值随提交带回（排序值始终以库内值为准）
   defaultValue: '',
   isRequired: 0,
   displayScope: ['create', 'detail'],
   sortNo: 0,
 })
 
-// 下拉框选项动态编辑（仅填显示文本；存储值：普通字段保存时按顺序自动生成 1、2、3…，
-// 状态字段保留各行原编码、新增行生成 CUSTOM_ 编码，避免改动 defect.status 存量值）
-const optionRows = ref<{ label: string; value?: string }[]>([])
+// 下拉框选项动态编辑（仅填显示文本；存储值"值随行保留"：拖拽调序/增删选项均不改变存量数据语义，
+// 与缺陷流转状态（defect_status）编码处理一致；缺值行保存时自动分配新值）
+/** 枚举选项行：uid=行唯一标识（v-for key 与拖拽重排身份），value=存储值 */
+interface OptionRow {
+  uid: number
+  label: string
+  value?: string
+}
+const optionRows = ref<OptionRow[]>([])
+// 行唯一标识自增种子
+let optionRowSeed = 0
+
+function nextOptionRowUid(): number {
+  return ++optionRowSeed
+}
+
 const isSelectType = computed(() => form.fieldType === 'select')
 // 状态字段（fieldKey=defect_status）：流转状态下拉框的选项来源，编码不可重排、类型不可改、不可删除
 const isStatusField = computed(() => isEdit.value && editingFieldKey.value === 'defect_status')
@@ -220,18 +233,21 @@ function openEdit(row: any) {
   form.description = row.description || ''
   form.optionsJson = row.optionsJson || ''
   form.defaultValue = row.defaultValue || ''
-  form.isRequired = row.isRequired || 0
-  form.displayScope = toScopeList(row.displayScope)
+  // "状态"字段系统预置为必填，不可修改（开关置灰并强制携带 1 提交）
+  form.isRequired = isStatusField.value ? 1 : row.isRequired || 0
+  // "状态"字段显示位置系统预置为"缺陷详情"，不可修改（下拉框置灰并强制携带）
+  form.displayScope = isStatusField.value ? ['detail'] : toScopeList(row.displayScope)
   form.sortNo = row.sortNo || 0
 
-  // 解析已有选项（仅取显示文本；状态字段额外保留各选项原编码，改显示名不影响存储值）
+  // 解析已有选项（保留各选项原存储值：改显示名/调整顺序均不影响存量数据语义）
   if (row.fieldType === 'select' && row.optionsJson) {
     try {
       const parsed = JSON.parse(row.optionsJson)
       optionRows.value = Array.isArray(parsed)
         ? parsed.map((o: any) => ({
+            uid: nextOptionRowUid(),
             label: String(o?.label ?? ''),
-            value: isStatusField.value ? String(o?.value ?? '') : undefined,
+            value: String(o?.value ?? ''),
           }))
         : []
     } catch {
@@ -252,17 +268,33 @@ function generateStatusValue() {
 }
 
 function addOptionRow() {
-  optionRows.value.push(isStatusField.value ? { label: '', value: generateStatusValue() } : { label: '' })
+  optionRows.value.push(
+    isStatusField.value
+      ? { uid: nextOptionRowUid(), label: '', value: generateStatusValue() }
+      : { uid: nextOptionRowUid(), label: '' }
+  )
 }
 
-function removeOptionRow(index: number) {
-  optionRows.value.splice(index, 1)
+/** 按行删除（拖拽重排后索引会变化，按行对象定位更稳妥） */
+function removeOptionRow(row: OptionRow) {
+  const idx = optionRows.value.indexOf(row)
+  if (idx >= 0) optionRows.value.splice(idx, 1)
 }
 
 // ===== 提交（新增 / 保存修改） =====
 async function handleSubmit() {
   if (!form.fieldLabel.trim()) {
     ElMessage.warning('请填写字段标签')
+    return
+  }
+  // 字段标签不能重复（同一模块内唯一：本地预检，后端兜底；编辑时排除自身）
+  const labelDup = fieldList.value.some(
+    (f: any) =>
+      f.id !== editingId.value &&
+      String(f.fieldLabel || '').trim().toLowerCase() === form.fieldLabel.trim().toLowerCase()
+  )
+  if (labelDup) {
+    ElMessage.warning(`字段标签「${form.fieldLabel.trim()}」已存在`)
     return
   }
   if (!form.fieldType) {
@@ -274,13 +306,21 @@ async function handleSubmit() {
     return
   }
 
-  // 构建 optionsJson（仅 select 类型）：普通字段存储值按选项顺序自动生成 1、2、3…（0 保留为默认/未设置）；
-  // 状态字段保留各选项原编码（系统英文码 + CUSTOM_ 自定义码），避免改动 defect.status 存量值
+  // 构建 optionsJson（仅 select 类型）：各类型均"值随行保留"（拖拽调序/增删选项不改变存量数据语义）；
+  // 缺值行自动分配新值——状态字段=CUSTOM_ 编码；普通字段=现有数字值最大值递增的编号（保持数字观感）
   if (isSelectType.value) {
     const validRows = optionRows.value.filter((r) => r.label.trim())
-    const validOptions = isStatusField.value
-      ? validRows.map((r) => ({ label: r.label, value: r.value || generateStatusValue() }))
-      : validRows.map((r, index) => ({ label: r.label, value: String(index + 1) }))
+    let validOptions: { label: string; value: string }[]
+    if (isStatusField.value) {
+      validOptions = validRows.map((r) => ({ label: r.label, value: r.value || generateStatusValue() }))
+    } else {
+      let maxNo = 0
+      validRows.forEach((r) => {
+        const n = Number(r.value)
+        if (r.value && Number.isInteger(n) && n > maxNo) maxNo = n
+      })
+      validOptions = validRows.map((r) => ({ label: r.label, value: r.value || String(++maxNo) }))
+    }
     form.optionsJson = JSON.stringify(validOptions)
   } else {
     form.optionsJson = ''
@@ -326,6 +366,17 @@ function ensureSortable() {
     handle: '.cf-drag-handle',
     animation: 150,
     ghostClass: 'cf-drag-ghost',
+    // 「状态」字段位置不可修改：禁止任何行插入到它之前（状态行本身无拖拽手柄、不可拖动）
+    onMove: (evt) => {
+      const statusIdx = fieldList.value.findIndex((f: any) => f.fieldKey === 'defect_status')
+      if (statusIdx < 0) return true
+      const siblings = Array.from(evt.to.children)
+      const relatedIdx = evt.related ? siblings.indexOf(evt.related) : -1
+      if (relatedIdx < 0) return true
+      // 拖动行将插入的位置：related 之后则 +1，否则即 related 处
+      const insertIdx = evt.willInsertAfter ? relatedIdx + 1 : relatedIdx
+      return insertIdx > statusIdx
+    },
     onEnd: ({ oldIndex, newIndex }) => handleDragEnd(oldIndex, newIndex),
   })
 }
@@ -343,6 +394,12 @@ async function handleDragEnd(oldIndex?: number, newIndex?: number) {
   const list = [...fieldList.value]
   const [moved] = list.splice(oldIndex, 1)
   list.splice(newIndex, 0, moved)
+  // 「状态」字段位置不可修改：兜底校验（拖拽约束已阻止，异常情况下恢复原顺序）
+  if (list.findIndex((f: any) => f.fieldKey === 'defect_status') > 0) {
+    ElMessage.warning('「状态」字段固定排第一位，不能调整其位置')
+    await fetchList()
+    return
+  }
   fieldList.value = list
 
   sortable?.option('disabled', true)
@@ -363,6 +420,47 @@ watch(viewReady, (ready) => {
 })
 
 onBeforeUnmount(destroySortable)
+
+// ===== 枚举项拖拽排序（弹窗内拖动行首手柄调整选项顺序：仅调本地顺序，保存时按新顺序提交） =====
+const optionRowsRef = ref<HTMLElement>()
+let optionSortable: Sortable | null = null
+
+function destroyOptionSortable() {
+  if (optionSortable) {
+    optionSortable.destroy()
+    optionSortable = null
+  }
+}
+
+function ensureOptionSortable() {
+  if (optionSortable || !dialogVisible.value || !isSelectType.value || !optionRowsRef.value) return
+  optionSortable = Sortable.create(optionRowsRef.value, {
+    handle: '.cf-drag-handle',
+    draggable: '.option-row',
+    animation: 150,
+    ghostClass: 'cf-drag-ghost',
+    onEnd: ({ oldIndex, newIndex }) => handleOptionDragEnd(oldIndex, newIndex),
+  })
+}
+
+/** 按拖拽结果重排本地选项数据（行 DOM 已由 sortable 调整；uid 稳定 key 保证 Vue 正确复用行） */
+function handleOptionDragEnd(oldIndex?: number, newIndex?: number) {
+  if (oldIndex == null || newIndex == null || oldIndex === newIndex) return
+  const list = [...optionRows.value]
+  const [moved] = list.splice(oldIndex, 1)
+  list.splice(newIndex, 0, moved)
+  optionRows.value = list
+}
+
+// 弹窗打开/关闭、类型切为下拉框/切走时，重建或销毁枚举项拖拽实例（容器随 v-if 挂载卸载）
+watch([dialogVisible, isSelectType], async () => {
+  destroyOptionSortable()
+  if (!dialogVisible.value || !isSelectType.value) return
+  await nextTick()
+  ensureOptionSortable()
+})
+
+onBeforeUnmount(destroyOptionSortable)
 
 // ===== 删除 =====
 async function handleDelete(row: any) {
@@ -447,8 +545,16 @@ async function handleDelete(row: any) {
                   style="width: 100%;"
                 >
                   <el-table-column v-if="canSort" width="40" align="center">
-                    <template #default>
-                      <span class="cf-drag-handle" title="拖动调整顺序">
+                    <template #default="{ row }">
+                      <!-- 「状态」字段固定排第一位：不提供拖拽手柄，显示锁定标识 -->
+                      <span
+                        v-if="row.fieldKey === 'defect_status'"
+                        class="cf-drag-locked"
+                        title="系统预置字段，固定排第一位，不能调整位置"
+                      >
+                        <el-icon><Lock /></el-icon>
+                      </span>
+                      <span v-else class="cf-drag-handle" title="拖动调整顺序">
                         <el-icon><Rank /></el-icon>
                       </span>
                     </template>
@@ -544,10 +650,23 @@ async function handleDelete(row: any) {
             </el-select>
           </el-form-item>
           <el-form-item label="是否必填">
-            <el-switch v-model="form.isRequired" :active-value="1" :inactive-value="0" />
+            <!-- "状态"字段系统预置为必填，不可被修改（置灰固定为"是"） -->
+            <el-switch
+              v-model="form.isRequired"
+              :active-value="1"
+              :inactive-value="0"
+              :disabled="isStatusField"
+            />
           </el-form-item>
           <el-form-item label="显示位置">
-            <el-select v-model="form.displayScope" multiple placeholder="请选择显示位置" style="width: 100%">
+            <!-- "状态"字段系统预置为"缺陷详情"，不可被修改（置灰锁定） -->
+            <el-select
+              v-model="form.displayScope"
+              multiple
+              placeholder="请选择显示位置"
+              style="width: 100%"
+              :disabled="isStatusField"
+            >
               <el-option v-for="s in displayScopeOptions" :key="s.value" :value="s.value" :label="s.label" />
             </el-select>
           </el-form-item>
@@ -564,18 +683,18 @@ async function handleDelete(row: any) {
             />
           </el-form-item>
 
-          <!-- 下拉框选项配置（跨两列；普通字段存储值按顺序自动生成，状态字段保留原编码、新增行自动生成 CUSTOM_ 编码） -->
+          <!-- 下拉框选项配置（跨两列；存储值随行保留，拖拽调序/增删选项不影响存量数据；缺值行保存时自动分配新值） -->
           <el-form-item v-if="isSelectType" label="枚举选项" class="span-2">
-            <div v-if="isStatusField" class="status-field-tip">
-              此字段为缺陷流转状态下拉框的枚举来源：可增删选项、修改显示名、调整顺序；删除选项后存量缺陷保留原状态值
-            </div>
-            <div class="option-rows">
-              <div v-for="(row, index) in optionRows" :key="index" class="option-row">
+            <div ref="optionRowsRef" class="option-rows">
+              <div v-for="row in optionRows" :key="row.uid" class="option-row">
+                <span class="cf-drag-handle" title="拖动调整顺序">
+                  <el-icon><Rank /></el-icon>
+                </span>
                 <el-input v-model="row.label" placeholder="显示文本" style="flex: 1" />
-                <el-button link type="danger" @click="removeOptionRow(index)">删除</el-button>
+                <el-button link type="danger" @click="removeOptionRow(row)">删除</el-button>
               </div>
-              <el-button type="primary" link @click="addOptionRow">+ 添加选项</el-button>
             </div>
+            <el-button type="primary" link @click="addOptionRow">+ 添加选项</el-button>
           </el-form-item>
         </div>
       </el-form>
@@ -738,18 +857,6 @@ async function handleDelete(row: any) {
   color: #c0c4cc;
 }
 
-/* 状态字段编辑提示：说明此字段为流转状态下拉框的枚举来源 */
-.status-field-tip {
-  width: 100%;
-  font-size: 12px;
-  color: #909399;
-  line-height: 1.5;
-  margin-bottom: 8px;
-  padding: 6px 10px;
-  background: #f5f7fa;
-  border-radius: 4px;
-}
-
 .option-rows {
   width: 100%;
 }
@@ -773,6 +880,14 @@ async function handleDelete(row: any) {
 }
 .cf-drag-handle:active {
   cursor: grabbing;
+}
+
+/* 锁定行标识（「状态」字段固定排第一位，不可拖拽） */
+.cf-drag-locked {
+  display: inline-flex;
+  align-items: center;
+  color: #c0c4cc;
+  cursor: not-allowed;
 }
 
 /* 拖拽中的占位行 */
