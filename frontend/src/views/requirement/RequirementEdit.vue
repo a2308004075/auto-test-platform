@@ -6,7 +6,8 @@
 <script setup lang="ts">
 /**
  * 需求条目编辑/新建
- * 表单：标题、描述、需求类型、优先级、状态、负责人、截止日期
+ * 表单：标题、描述、需求类型、优先级、状态、负责人、截止日期；
+ * 动态字段统一取【字段管理-需求字段】配置，按"显示位置"区分新建/编辑可见性
  */
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -33,9 +34,17 @@ const loading = ref(false)
 const saving = ref(false)
 const formRef = ref<FormInstance>()
 
-// 动态字段
+// 动态字段（全量配置 + 当前模式可见字段过滤 + 字段值）
 const customFields = ref<any[]>([])
 const customFieldValues = ref<Record<string, any>>({})
+
+/** 当前模式可见动态字段：按"显示位置"过滤（新建=both+create；编辑=both+detail） */
+const visibleCustomFields = computed(() =>
+  customFields.value.filter((f: any) => {
+    const scope = f.displayScope || 'both'
+    return isNew.value ? scope !== 'detail' : scope !== 'create'
+  })
+)
 
 const form = reactive({
   title: '',
@@ -68,6 +77,8 @@ async function fetchDetail() {
       form.status = data.status || 'PENDING'
       form.assignee = data.assignee || ''
       form.deadline = data.deadline || ''
+      // 动态字段值回显（后端按【字段管理-需求字段】配置返回）
+      customFieldValues.value = { ...(data.customFields || {}) }
     }
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.message || '加载需求详情失败')
@@ -122,18 +133,20 @@ onMounted(() => {
 
 async function fetchCustomFields() {
   try {
-    const viewType = isNew.value ? 'create' : 'edit'
+    // 新建/编辑统一取【字段管理-需求字段】配置（统一存 edit 视图），由"显示位置"区分可见性
     const res: any = await getCustomFieldsForRender({
       projectId: projectId.value,
       module: 'requirement',
-      viewType,
+      viewType: 'edit',
     })
     customFields.value = res.data || []
-    // 初始化默认值
-    for (const field of customFields.value) {
-      if (field.defaultValue !== null && field.defaultValue !== undefined && field.defaultValue !== '') {
-        if (customFieldValues.value[field.fieldKey] === undefined) {
-          customFieldValues.value[field.fieldKey] = field.defaultValue
+    // 新建模式：初始化可见字段默认值（编辑模式由后端回填值）
+    if (isNew.value) {
+      for (const field of visibleCustomFields.value) {
+        if (field.defaultValue !== null && field.defaultValue !== undefined && field.defaultValue !== '') {
+          if (customFieldValues.value[field.fieldKey] === undefined) {
+            customFieldValues.value[field.fieldKey] = field.defaultValue
+          }
         }
       }
     }
@@ -206,11 +219,11 @@ async function fetchCustomFields() {
           </div>
         </div>
 
-        <!-- 动态字段 -->
-        <div v-if="customFields.length > 0" class="form-section">
+        <!-- 动态字段（按"显示位置"过滤：新建=both+create；编辑=both+detail） -->
+        <div v-if="visibleCustomFields.length > 0" class="form-section">
           <div class="form-section-title">字段信息</div>
           <DynamicFieldGrid
-            :fields="customFields"
+            :fields="visibleCustomFields"
             :model-value="customFieldValues"
             @update:model-value="customFieldValues = $event"
           />

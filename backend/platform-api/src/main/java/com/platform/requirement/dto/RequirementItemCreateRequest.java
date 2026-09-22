@@ -10,6 +10,7 @@ import lombok.Data;
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.Size;
 import java.time.LocalDate;
+import java.util.Map;
 
 /**
  * 创建/更新需求条目请求
@@ -35,4 +36,9 @@ public class RequirementItemCreateRequest {
     private String assignee;
 
     private LocalDate deadline;
+
+    /**
+     * 自定义字段值（fieldKey -> 字段值，由【字段管理】动态配置驱动）
+     */
+    private Map<String, String> customFields;
 }

@@ -11,7 +11,7 @@
  * 详情模式（/defects/:defectId）：内置查看/编辑模式
  * 内容（富文本）：进入编辑模式后修改（取消/保存在内容模块标题行）
  * 缺陷标题：新建时页头直接输入；详情时点击标题行内编辑，失焦自动保存
- * 字段信息：新建与详情统一使用【字段管理-编辑缺陷】视图配置
+ * 字段信息：统一使用【字段管理-缺陷字段】配置，按"显示位置"区分新建/详情可见性
  * 附件 / 关联：新建本页暂存；详情直接操作（增删即时保存）
  */
 import { ref, reactive, onMounted, computed, watch, shallowRef, nextTick } from 'vue'
@@ -40,7 +40,7 @@ const defectId = computed(() => Number(route.params.defectId))
 const isCreate = computed(() => !route.params.defectId)
 const { options: relationTypeOptions } = useDict('defect_relation_type')
 const { options: targetTypeOptions } = useDict('defect_target_type')
-// 状态选项优先读【字段管理-编辑缺陷】的"状态"字段配置（按项目），无配置回退字典
+// 状态选项优先读【字段管理-缺陷字段】的"状态"字段配置（按项目），无配置回退字典
 const { options: statusOptions } = useDefectStatusOptions(() => projectId.value)
 
 const relationTypeLabelMap = computed(() => {
@@ -75,8 +75,16 @@ const form = reactive({
 })
 // 动态字段值（fieldKey -> 值）：新建初始化默认值；详情加载与每次保存后同步自后端
 const fieldValues = ref<Record<string, any>>({})
-// 动态字段配置（新建与详情统一取【字段管理】中【缺陷-编辑缺陷】视图）
+// 动态字段配置全量（【字段管理-缺陷字段】统一存 edit 视图；含全部显示位置，变更记录翻译用）
 const editFields = ref<any[]>([])
+
+/** 当前模式可见字段：按"显示位置"过滤（新建=both+create；详情=both+detail） */
+const visibleEditFields = computed(() =>
+  editFields.value.filter((f: any) => {
+    const scope = f.displayScope || 'both'
+    return isCreate.value ? scope !== 'detail' : scope !== 'create'
+  })
+)
 
 // 关联（新建模式本页暂存随创建提交；详情模式实时增删）
 const relationForm = reactive({ relationType: 'RELATED', targetType: 'AUTO_CASE', targetId: undefined as number | undefined, targetTitle: '' })
@@ -272,7 +280,7 @@ async function fetchGroups() {
   } catch { groups.value = [] }
 }
 
-/** 动态字段配置（新建与详情统一取【缺陷-编辑缺陷】视图；新建模式初始化字段默认值） */
+/** 动态字段配置（【字段管理-缺陷字段】统一存 edit 视图；新建模式初始化可见字段默认值） */
 async function fetchEditFields() {
   try {
     const res: any = await getCustomFieldsForRender({
@@ -282,9 +290,9 @@ async function fetchEditFields() {
     })
     // 状态字段（defect_status）仅作为流转下拉框的选项来源，不进字段信息区渲染（其值走 defect.status，不走自定义字段值）
     editFields.value = (res.data || []).filter((f: any) => f.fieldKey !== 'defect_status')
-    // 新建模式：初始化字段默认值（详情模式由后端回填值，无需默认值）
+    // 新建模式：初始化可见字段默认值（详情模式由后端回填值，无需默认值）
     if (isCreate.value) {
-      for (const field of editFields.value) {
+      for (const field of visibleEditFields.value) {
         if (field.defaultValue !== null && field.defaultValue !== undefined && field.defaultValue !== '') {
           if (fieldValues.value[field.fieldKey] === undefined) {
             fieldValues.value[field.fieldKey] = field.defaultValue
@@ -650,8 +658,8 @@ onMounted(() => {
             <div class="block-title">字段信息</div>
             <el-form label-position="top">
               <DynamicFieldGrid
-                v-if="editFields.length > 0"
-                :fields="editFields"
+                v-if="visibleEditFields.length > 0"
+                :fields="visibleEditFields"
                 :model-value="fieldValues"
                 @update:model-value="fieldValues = $event"
                 @field-change="handleFieldSave"

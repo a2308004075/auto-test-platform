@@ -1,6 +1,6 @@
 /**
  * @description 缺陷状态选项加载器
- * 优先读【字段管理-编辑缺陷】的"状态"字段配置（fieldKey=defect_status，按项目），
+ * 优先读【字段管理-缺陷字段】的"状态"字段配置（fieldKey=defect_status，按项目），
  * 无配置时回退 defect_status 字典（9 个默认状态），保证未配置项目功能不回退
  */
 import { ref, computed, watch } from 'vue'

@@ -24,6 +24,7 @@ import com.platform.requirement.entity.RequirementItem;
 import com.platform.requirement.entity.RequirementVersion;
 import com.platform.requirement.mapper.RequirementItemMapper;
 import com.platform.requirement.mapper.RequirementVersionMapper;
+import com.platform.sys.service.CustomFieldValueService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
@@ -53,6 +54,7 @@ public class RequirementService {
     private final RequirementCaseRelationService requirementCaseRelationService;
     private final RequirementGroupService requirementGroupService;
     private final ApplicationEventPublisher eventPublisher;
+    private final CustomFieldValueService customFieldValueService;
 
     // ===== 版本管理 =====
 
@@ -141,13 +143,14 @@ public class RequirementService {
     public void deleteVersion(Long versionId) {
         RequirementVersion version = findVersionById(versionId);
 
-        // 清理该版本下所有条目的评论、变更记录与用例关联
+        // 清理该版本下所有条目的评论、变更记录、自定义字段值与用例关联
         LambdaQueryWrapper<RequirementItem> itemWrapper = new LambdaQueryWrapper<>();
         itemWrapper.eq(RequirementItem::getVersionId, versionId);
         List<RequirementItem> items = itemMapper.selectList(itemWrapper);
         for (RequirementItem item : items) {
             commentService.deleteByBiz(BizType.REQUIREMENT_ITEM, item.getId());
             changeLogService.deleteByBiz(BizType.REQUIREMENT_ITEM, item.getId());
+            customFieldValueService.deleteByEntity("requirement", item.getId());
             requirementCaseRelationService.deleteByItem(item.getId());
         }
 
@@ -164,7 +167,12 @@ public class RequirementService {
      * 查询单个需求条目详情
      */
     public RequirementItemResponse getItem(Long itemId) {
-        return toItemResponse(findItemById(itemId));
+        RequirementItem item = findItemById(itemId);
+        RequirementItemResponse resp = toItemResponse(item);
+        // 自定义字段值（由【字段管理】动态配置驱动，按所属版本定位项目）
+        RequirementVersion version = findVersionById(item.getVersionId());
+        resp.setCustomFields(customFieldValueService.loadValues(version.getProjectId(), "requirement", itemId));
+        return resp;
     }
 
     /**
@@ -191,7 +199,7 @@ public class RequirementService {
      */
     @Transactional(rollbackFor = Exception.class)
     public RequirementItemResponse createItem(RequirementItemCreateRequest request) {
-        findVersionById(request.getVersionId());
+        RequirementVersion version = findVersionById(request.getVersionId());
 
         RequirementItem item = new RequirementItem();
         item.setVersionId(request.getVersionId());
@@ -212,6 +220,9 @@ public class RequirementService {
         item.setSortOrder(last != null && last.getSortOrder() != null ? last.getSortOrder() + 1 : 0);
 
         itemMapper.insert(item);
+
+        // 保存自定义字段值（新建/编辑统一使用【字段管理】需求单视图配置）
+        customFieldValueService.saveValues(version.getProjectId(), "requirement", "edit", item.getId(), request.getCustomFields());
 
         // 知识库同步：条目变更归入所属版本重新采集
         publishVersionEvent(item.getVersionId());
@@ -262,6 +273,10 @@ public class RequirementService {
                 .compare("deadline", oldDeadline, item.getDeadline())
                 .save();
 
+        // 保存自定义字段值（由【字段管理】动态配置驱动）
+        RequirementVersion version = findVersionById(item.getVersionId());
+        customFieldValueService.saveValues(version.getProjectId(), "requirement", "edit", itemId, request.getCustomFields());
+
         // 知识库同步：条目变更归入所属版本重新采集
         publishVersionEvent(item.getVersionId());
 
@@ -277,6 +292,8 @@ public class RequirementService {
         commentService.deleteByBiz(BizType.REQUIREMENT_ITEM, itemId);
         changeLogService.deleteByBiz(BizType.REQUIREMENT_ITEM, itemId);
         requirementCaseRelationService.deleteByItem(itemId);
+        // 自定义字段值级联清理
+        customFieldValueService.deleteByEntity("requirement", itemId);
         itemMapper.deleteById(itemId);
 
         // 知识库同步：条目删除归入所属版本重新采集

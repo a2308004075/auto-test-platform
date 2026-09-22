@@ -26,7 +26,7 @@ import { getCustomFieldsForRender } from '@/api/customField'
 const route = useRoute()
 const router = useRouter()
 const projectId = computed(() => Number(route.params.id))
-// 状态选项优先读【字段管理-编辑缺陷】的"状态"字段配置（按项目），无配置回退字典
+// 状态选项优先读【字段管理-缺陷字段】的"状态"字段配置（按项目），无配置回退字典
 const { options: statusOptions } = useDefectStatusOptions(() => projectId.value)
 
 // ===== 列表数据 =====
@@ -350,10 +350,10 @@ function handleDelete(record: any) {
     .catch(() => {})
 }
 
-// ===== 动态字段列（与详情页"字段信息"同源：【字段管理-编辑缺陷】视图） =====
+// ===== 动态字段列（与详情页"字段信息"同源：【字段管理-缺陷字段】统一存 edit 视图） =====
 const displayFields = ref<any[]>([])
 
-/** 加载列表动态列：状态走专门列、多行文本内容长不进列表 */
+/** 加载列表动态列：状态走专门列、多行文本内容长不进列表；"仅新建显示"字段不进列表（列表属查看场景，与详情一致） */
 async function fetchDisplayFields() {
   try {
     const res: any = await getCustomFieldsForRender({
@@ -362,7 +362,7 @@ async function fetchDisplayFields() {
       viewType: 'edit',
     })
     displayFields.value = (res.data || []).filter(
-      (f: any) => f.fieldKey !== 'defect_status' && f.fieldType !== 'textarea',
+      (f: any) => f.fieldKey !== 'defect_status' && f.fieldType !== 'textarea' && (f.displayScope || 'both') !== 'create',
     )
   } catch { displayFields.value = [] }
 }
@@ -602,7 +602,7 @@ onBeforeUnmount(() => {
               {{ row.groupName || '未分组' }}
             </template>
           </el-table-column>
-          <!-- 动态字段列（【字段管理-编辑缺陷】视图，与详情页"字段信息"同源） -->
+          <!-- 动态字段列（【字段管理-缺陷字段】，与详情页"字段信息"同源；仅新建显示的字段不进列表） -->
           <el-table-column
             v-for="field in displayFields"
             :key="field.fieldKey"

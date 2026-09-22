@@ -69,6 +69,11 @@ public class CustomFieldCreateRequest {
     private Integer isRequired;
 
     /**
+     * 显示位置：both=都显示 create=仅新建显示 detail=仅详情(编辑)显示（缺省为 both）
+     */
+    private String displayScope;
+
+    /**
      * 排序号
      */
     private Integer sortNo;

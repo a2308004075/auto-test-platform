@@ -9,6 +9,7 @@ import lombok.Data;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Map;
 
 /**
  * 需求条目响应
@@ -39,4 +40,9 @@ public class RequirementItemResponse {
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;
+
+    /**
+     * 自定义字段值（fieldKey -> 字段值，由【字段管理】动态配置驱动）
+     */
+    private Map<String, String> customFields;
 }

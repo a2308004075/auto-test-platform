@@ -26,7 +26,7 @@ const emit = defineEmits<{
   (e: 'confirm', rows: Array<{ id: number; defectNo: string; title: string; status: string }>): void
 }>()
 
-// 状态选项优先读【字段管理-编辑缺陷】的"状态"字段配置（按项目），无配置回退字典
+// 状态选项优先读【字段管理-缺陷字段】的"状态"字段配置（按项目），无配置回退字典
 const { options: statusOptions } = useDefectStatusOptions(() => props.projectId)
 
 const statusLabelMap = computed(() => {

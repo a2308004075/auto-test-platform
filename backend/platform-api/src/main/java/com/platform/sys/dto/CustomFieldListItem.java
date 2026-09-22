@@ -24,6 +24,7 @@ public class CustomFieldListItem {
     private String optionsJson;
     private String defaultValue;
     private Integer isRequired;
+    private String displayScope;
     private Integer sortNo;
     private Integer isActive;
     private String createdAt;

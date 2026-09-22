@@ -28,6 +28,10 @@ public class CustomFieldRenderDTO {
     private List<FieldOption> options;
     private String defaultValue;
     private Integer isRequired;
+    /**
+     * 显示位置：both=都显示 create=仅新建显示 detail=仅详情(编辑)显示
+     */
+    private String displayScope;
     private Integer sortNo;
 
     /**

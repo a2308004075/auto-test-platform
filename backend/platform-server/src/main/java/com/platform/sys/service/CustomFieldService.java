@@ -48,6 +48,12 @@ public class CustomFieldService {
             "text", "textarea", "select", "datetime", "number", "user", "environment"));
 
     /**
+     * 合法的显示位置集合（both=都显示 create=仅新建显示 detail=仅详情(编辑)显示）
+     */
+    private static final Set<String> VALID_DISPLAY_SCOPES = new HashSet<>(Arrays.asList(
+            "both", "create", "detail"));
+
+    /**
      * 缺陷状态字段的固定 fieldKey：缺陷列表/详情页流转状态下拉框的选项来源
      */
     public static final String DEFECT_STATUS_FIELD_KEY = "defect_status";
@@ -110,6 +116,9 @@ public class CustomFieldService {
         }
         if (field.getIsRequired() == null) {
             field.setIsRequired(0);
+        }
+        if (field.getDisplayScope() == null || field.getDisplayScope().isEmpty()) {
+            field.setDisplayScope("both");
         }
         field.setIsActive(1);
         customFieldMapper.insert(field);
@@ -229,13 +238,18 @@ public class CustomFieldService {
     }
 
     /**
-     * 字段类型校验
+     * 字段类型与显示位置校验
      */
     private void validateFieldType(CustomFieldCreateRequest request) {
         String type = request.getFieldType();
         if (!VALID_FIELD_TYPES.contains(type)) {
             throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR,
                     "不支持的字段类型：" + type);
+        }
+        String scope = request.getDisplayScope();
+        if (scope != null && !scope.isEmpty() && !VALID_DISPLAY_SCOPES.contains(scope)) {
+            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR,
+                    "不支持的显示位置：" + scope);
         }
     }
 
@@ -252,6 +266,7 @@ public class CustomFieldService {
         item.setOptionsJson(field.getOptionsJson());
         item.setDefaultValue(field.getDefaultValue());
         item.setIsRequired(field.getIsRequired());
+        item.setDisplayScope(field.getDisplayScope());
         item.setSortNo(field.getSortNo());
         item.setIsActive(field.getIsActive());
         if (field.getCreatedAt() != null) {
@@ -272,6 +287,7 @@ public class CustomFieldService {
         dto.setOptionsJson(field.getOptionsJson());
         dto.setDefaultValue(field.getDefaultValue());
         dto.setIsRequired(field.getIsRequired());
+        dto.setDisplayScope(field.getDisplayScope());
         dto.setSortNo(field.getSortNo());
         return dto;
     }

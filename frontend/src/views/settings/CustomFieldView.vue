@@ -6,8 +6,9 @@
 <script setup lang="ts">
 /**
  * 字段管理页面（仅 ADMIN）
- * 左侧层级树：项目（当前项目）→ 模块（固定 缺陷/需求）→ 视图（缺陷：新建/详情统一“编辑缺陷”视图；需求：新建/编辑）；
- * 只允许在视图层级（叶子节点）编辑字段；右侧字段列表，新增/编辑通过弹窗填写
+ * 左侧层级树：项目（当前项目）→ 模块（固定 缺陷/需求），模块下不再分视图，
+ * 字段统一存于 edit 视图，用"显示位置"区分新建/详情差异化显示；
+ * 右侧字段列表，新增/编辑通过弹窗填写
  */
 import { ref, reactive, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -27,68 +28,37 @@ const hasCurrentProject = computed(() => !!projectStore.currentProjectId)
 const currentProjectId = computed(() => projectStore.currentProjectId)
 const currentProjectName = computed(() => projectStore.currentProjectName)
 
-// ===== 层级树：项目 → 模块 → 视图（模块与视图固定） =====
-interface ViewNode {
-  label: string
-  viewType: string
-}
+// ===== 层级树：项目 → 模块（模块固定；字段统一存 edit 视图，由"显示位置"驱动新建/详情差异） =====
 interface ModuleNode {
   label: string
   module: string
-  views: ViewNode[]
 }
 
 const moduleTree: ModuleNode[] = [
-  {
-    label: '缺陷',
-    module: 'defect',
-    views: [
-      // 新建缺陷与缺陷详情为同一套字段（统一视图），仅保留“编辑缺陷”视图节点
-      { label: '编辑缺陷', viewType: 'edit' },
-    ],
-  },
-  {
-    label: '需求',
-    module: 'requirement',
-    views: [
-      { label: '新建需求', viewType: 'create' },
-      { label: '编辑需求', viewType: 'edit' },
-    ],
-  },
+  { label: '缺陷字段', module: 'defect' },
+  { label: '需求字段', module: 'requirement' },
 ]
 
 // 树展开状态
 const rootExpanded = ref(true)
-const moduleExpanded = ref<Record<string, boolean>>({ defect: true, requirement: true })
 
 function toggleRoot() {
   rootExpanded.value = !rootExpanded.value
 }
 
-function toggleModule(module: string) {
-  moduleExpanded.value[module] = !moduleExpanded.value[module]
-}
-
-// ===== 选中视图（仅叶子节点可选；只有视图层级允许编辑字段） =====
+// ===== 选中模块（模块节点即可选） =====
 const selectedModule = ref('')
-const selectedViewType = ref('')
 
 const selectedModuleLabel = computed(
   () => moduleTree.find((m) => m.module === selectedModule.value)?.label || ''
 )
-const selectedViewLabel = computed(() => {
-  const m = moduleTree.find((x) => x.module === selectedModule.value)
-  return m?.views.find((v) => v.viewType === selectedViewType.value)?.label || ''
-})
 
-// 当前项目 + 模块 + 视图选齐后右侧才可编辑
-const viewReady = computed(
-  () => hasCurrentProject.value && !!selectedModule.value && !!selectedViewType.value
-)
+// 当前项目 + 模块选齐后右侧才可编辑（字段统一存 edit 视图）
+const viewReady = computed(() => hasCurrentProject.value && !!selectedModule.value)
 
 const placeholderText = computed(() => {
   if (!hasCurrentProject.value) return '请先从首页进入项目，再使用字段管理'
-  return '请在左侧选择具体视图（如"编辑缺陷"）'
+  return '请在左侧选择具体模块（如"缺陷字段"）'
 })
 
 const fieldTypeOptions = [
@@ -111,6 +81,19 @@ const fieldTypeLabelMap: Record<string, string> = {
   environment: '环境选择',
 }
 
+// 显示位置选项/标签：按当前模块动态生成文案（缺陷/需求）
+const moduleShortName = computed(() => (selectedModule.value === 'defect' ? '缺陷' : '需求'))
+const displayScopeOptions = computed(() => [
+  { label: '都显示', value: 'both' },
+  { label: `仅新建${moduleShortName.value}显示`, value: 'create' },
+  { label: `仅${moduleShortName.value}详情显示`, value: 'detail' },
+])
+const displayScopeLabelMap = computed<Record<string, string>>(() => ({
+  both: '都显示',
+  create: `仅新建${moduleShortName.value}显示`,
+  detail: `仅${moduleShortName.value}详情显示`,
+}))
+
 // ===== 列表数据 =====
 const loading = ref(false)
 const fieldList = ref<any[]>([])
@@ -129,6 +112,7 @@ const form = reactive({
   optionsJson: '',
   defaultValue: '',
   isRequired: 0,
+  displayScope: 'both',
   sortNo: 0,
 })
 
@@ -147,7 +131,7 @@ function handleFieldTypeChange() {
   }
 }
 
-// ===== 加载字段列表 =====
+// ===== 加载字段列表（字段统一存于 edit 视图） =====
 async function fetchList() {
   if (!viewReady.value) {
     fieldList.value = []
@@ -158,7 +142,7 @@ async function fetchList() {
     const res: any = await getCustomFields({
       projectId: currentProjectId.value,
       module: selectedModule.value,
-      viewType: selectedViewType.value,
+      viewType: 'edit',
     })
     fieldList.value = res.data || []
   } catch {
@@ -166,16 +150,15 @@ async function fetchList() {
   } finally {
     loading.value = false
   }
-  // 表格行渲染完成后再绑定拖拽排序（仅绑定一次，切换视图时 tbody 复用）
+  // 表格行渲染完成后再绑定拖拽排序（仅绑定一次，切换模块时 tbody 复用）
   await nextTick()
   ensureSortable()
 }
 
-// ===== 左侧选择视图叶子 =====
-function selectView(module: string, viewType: string) {
-  if (selectedModule.value === module && selectedViewType.value === viewType) return
+// ===== 左侧选择模块节点 =====
+function selectView(module: string) {
+  if (selectedModule.value === module) return
   selectedModule.value = module
-  selectedViewType.value = viewType
   resetForm()
   fetchList()
 }
@@ -185,7 +168,6 @@ watch(
   () => projectStore.currentProjectId,
   () => {
     selectedModule.value = ''
-    selectedViewType.value = ''
     dialogVisible.value = false
     resetForm()
     fieldList.value = []
@@ -208,6 +190,7 @@ function resetForm() {
   form.optionsJson = ''
   form.defaultValue = ''
   form.isRequired = 0
+  form.displayScope = 'both'
   form.sortNo = 0
   optionRows.value = []
 }
@@ -227,6 +210,7 @@ function openEdit(row: any) {
   form.optionsJson = row.optionsJson || ''
   form.defaultValue = row.defaultValue || ''
   form.isRequired = row.isRequired || 0
+  form.displayScope = row.displayScope || 'both'
   form.sortNo = row.sortNo || 0
 
   // 解析已有选项（仅取显示文本；状态字段额外保留各选项原编码，改显示名不影响存储值）
@@ -287,11 +271,11 @@ async function handleSubmit() {
     form.optionsJson = ''
   }
 
-  // 归属（项目/模块/视图）由当前项目与左侧选中视图决定，不可在表单中修改
+  // 归属（项目/模块）由当前项目与左侧选中模块决定，不可在表单中修改；字段统一存 edit 视图
   const data = {
     projectId: currentProjectId.value,
     module: selectedModule.value,
-    viewType: selectedViewType.value,
+    viewType: 'edit',
     ...form,
   }
 
@@ -406,29 +390,15 @@ async function handleDelete(row: any) {
           </span>
         </div>
 
-        <!-- 二级模块 → 三级视图（仅当前项目存在时展示） -->
+        <!-- 二级模块节点（可选叶子：字段统一存 edit 视图，由"显示位置"驱动新建/详情差异） -->
         <template v-if="hasCurrentProject && rootExpanded">
-          <div v-for="m in moduleTree" :key="m.module">
-            <div class="cf-node cf-node-module" @click="toggleModule(m.module)">
-              <el-icon :class="['cf-arrow', { expanded: moduleExpanded[m.module] }]">
-                <CaretRight />
-              </el-icon>
-              <span class="cf-node-label">{{ m.label }}</span>
-            </div>
-            <div v-show="moduleExpanded[m.module]">
-              <div
-                v-for="v in m.views"
-                :key="v.viewType"
-                :class="[
-                  'cf-node',
-                  'cf-node-leaf',
-                  { active: selectedModule === m.module && selectedViewType === v.viewType },
-                ]"
-                @click="selectView(m.module, v.viewType)"
-              >
-                <span class="cf-node-label">{{ v.label }}</span>
-              </div>
-            </div>
+          <div
+            v-for="m in moduleTree"
+            :key="m.module"
+            :class="['cf-node', 'cf-node-leaf', { active: selectedModule === m.module }]"
+            @click="selectView(m.module)"
+          >
+            <span class="cf-node-label">{{ m.label }}</span>
           </div>
         </template>
       </div>
@@ -478,6 +448,16 @@ async function handleDelete(row: any) {
                     <template #default="{ row }">
                       <el-tag v-if="row.isRequired" type="danger" size="small">是</el-tag>
                       <el-tag v-else size="small">否</el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="显示位置" width="130" align="center">
+                    <template #default="{ row }">
+                      <el-tag
+                        size="small"
+                        :type="row.displayScope === 'create' ? 'warning' : row.displayScope === 'detail' ? 'success' : 'info'"
+                      >
+                        {{ displayScopeLabelMap[row.displayScope] || '都显示' }}
+                      </el-tag>
                     </template>
                   </el-table-column>
                   <el-table-column label="描述" min-width="240">
@@ -532,7 +512,7 @@ async function handleDelete(row: any) {
     <!-- 新增 / 编辑字段弹窗 -->
     <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑字段' : '新增字段'" width="640px">
       <div class="cf-form-context">
-        当前配置：{{ currentProjectName }} / {{ selectedModuleLabel }} / {{ selectedViewLabel }}
+        当前配置：{{ currentProjectName }} / {{ selectedModuleLabel }}
       </div>
       <el-form :model="form" label-width="90px">
         <div class="cf-form-grid">
@@ -556,6 +536,11 @@ async function handleDelete(row: any) {
           </el-form-item>
           <el-form-item label="是否必填">
             <el-switch v-model="form.isRequired" :active-value="1" :inactive-value="0" />
+          </el-form-item>
+          <el-form-item label="显示位置">
+            <el-select v-model="form.displayScope" style="width: 100%">
+              <el-option v-for="s in displayScopeOptions" :key="s.value" :value="s.value" :label="s.label" />
+            </el-select>
           </el-form-item>
           <el-form-item label="排序号">
             <el-input-number v-model="form.sortNo" :min="0" :controls="false" style="width: 120px" />
@@ -655,14 +640,9 @@ async function handleDelete(row: any) {
   background: transparent;
 }
 
-/* 模块节点 */
-.cf-node-module {
-  padding-left: 24px;
-}
-
-/* 视图叶子节点 */
+/* 模块叶子节点（可选） */
 .cf-node-leaf {
-  padding-left: 60px;
+  padding-left: 24px;
 }
 .cf-node-leaf.active {
   background: #ecf5ff;
@@ -670,7 +650,7 @@ async function handleDelete(row: any) {
   font-weight: 500;
 }
 
-/* 展开箭头 */
+/* 展开箭头（仅根节点使用） */
 .cf-arrow {
   font-size: 14px;
   color: #909399;
