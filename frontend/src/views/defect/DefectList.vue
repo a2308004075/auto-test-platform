@@ -615,6 +615,7 @@ onBeforeUnmount(() => {
               {{ fieldDisplayText(field, row) }}
             </template>
           </el-table-column>
+          <el-table-column prop="createdByName" label="创建人" width="110" show-overflow-tooltip />
           <el-table-column label="创建时间" width="150">
             <template #default="{ row }">
               {{ row.createdAt?.substring(0, 16)?.replace('T', ' ') }}
