@@ -123,7 +123,8 @@ const form = reactive({
   // 仅保留属性用于编辑时回填原值随提交带回（排序值始终以库内值为准）
   defaultValue: '',
   isRequired: 0,
-  displayScope: ['create', 'detail'],
+  // "显示位置"为必填项：默认留空，需用户显式选择（前后端均校验非空）
+  displayScope: [] as string[],
   sortNo: 0,
 })
 
@@ -214,7 +215,7 @@ function resetForm() {
   form.optionsJson = ''
   form.defaultValue = ''
   form.isRequired = 0
-  form.displayScope = ['create', 'detail']
+  form.displayScope = []
   form.sortNo = 0
   optionRows.value = []
 }
@@ -303,6 +304,11 @@ async function handleSubmit() {
   }
   if (!form.displayScope || form.displayScope.length === 0) {
     ElMessage.warning('请至少选择一项显示位置')
+    return
+  }
+  // 「下拉框」类型：枚举选项为必填（至少一项有效选项，仅空白文本行视为未填；前端弹窗拦截、后端兜底）
+  if (isSelectType.value && !optionRows.value.some((r) => r.label.trim())) {
+    ElMessage.warning('请至少添加一项枚举选项')
     return
   }
 
@@ -649,7 +655,7 @@ async function handleDelete(row: any) {
               <el-option v-for="t in fieldTypeOptions" :key="t.value" :value="t.value" :label="t.label" />
             </el-select>
           </el-form-item>
-          <el-form-item label="是否必填">
+          <el-form-item label="是否必填" required>
             <!-- "状态"字段系统预置为必填，不可被修改（置灰固定为"是"） -->
             <el-switch
               v-model="form.isRequired"
@@ -658,7 +664,7 @@ async function handleDelete(row: any) {
               :disabled="isStatusField"
             />
           </el-form-item>
-          <el-form-item label="显示位置">
+          <el-form-item label="显示位置" required>
             <!-- "状态"字段系统预置为"缺陷详情"，不可被修改（置灰锁定） -->
             <el-select
               v-model="form.displayScope"
@@ -684,7 +690,7 @@ async function handleDelete(row: any) {
           </el-form-item>
 
           <!-- 下拉框选项配置（跨两列；存储值随行保留，拖拽调序/增删选项不影响存量数据；缺值行保存时自动分配新值） -->
-          <el-form-item v-if="isSelectType" label="枚举选项" class="span-2">
+          <el-form-item v-if="isSelectType" label="枚举选项" class="span-2" required>
             <div ref="optionRowsRef" class="option-rows">
               <div v-for="row in optionRows" :key="row.uid" class="option-row">
                 <span class="cf-drag-handle" title="拖动调整顺序">

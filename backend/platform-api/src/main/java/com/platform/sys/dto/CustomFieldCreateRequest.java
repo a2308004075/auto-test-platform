@@ -8,6 +8,7 @@ package com.platform.sys.dto;
 import lombok.Data;
 
 import javax.validation.constraints.NotBlank;
+import javax.validation.constraints.NotEmpty;
 import javax.validation.constraints.NotNull;
 import javax.validation.constraints.Size;
 
@@ -71,8 +72,9 @@ public class CustomFieldCreateRequest {
     private Integer isRequired;
 
     /**
-     * 显示位置（多值）：create=新建显示 detail=详情(编辑)显示（缺省为都显示）
+     * 显示位置（多值）：create=新建显示 detail=详情(编辑)显示（必填，至少选择一项）
      */
+    @NotEmpty(message = "请至少选择一项显示位置")
     private List<String> displayScope;
 
     /**

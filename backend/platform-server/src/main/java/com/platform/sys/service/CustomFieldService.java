@@ -126,6 +126,7 @@ public class CustomFieldService {
     @Transactional(rollbackFor = Exception.class)
     public CustomFieldListItem create(CustomFieldCreateRequest request) {
         validateFieldType(request);
+        validateSelectOptionsRequired(request);
         validateFieldLabelUnique(request, null);
 
         CustomField field = new CustomField();
@@ -150,6 +151,7 @@ public class CustomFieldService {
     @Transactional(rollbackFor = Exception.class)
     public CustomFieldListItem update(Long id, CustomFieldCreateRequest request) {
         validateFieldType(request);
+        validateSelectOptionsRequired(request);
 
         CustomField field = customFieldMapper.selectById(id);
         if (field == null) {
@@ -299,6 +301,33 @@ public class CustomFieldService {
                             "不支持的显示位置：" + scope);
                 }
             }
+        }
+    }
+
+    /**
+     * 「下拉框」类型字段的枚举选项必填校验（至少一项）
+     *
+     * <p>前端弹窗已拦截，此处兜底防止绕过接口提交空选项；
+     * optionsJson 结构为 [{"label":"显示文本","value":"存储值"},...]
+     */
+    private void validateSelectOptionsRequired(CustomFieldCreateRequest request) {
+        if (!"select".equals(request.getFieldType())) {
+            return;
+        }
+        String optionsJson = request.getOptionsJson();
+        if (optionsJson == null || optionsJson.trim().isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "请至少添加一项枚举选项");
+        }
+        List<Map<String, String>> rows;
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            rows = mapper.readValue(optionsJson,
+                    mapper.getTypeFactory().constructCollectionType(List.class, Map.class));
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "枚举选项数据格式不合法");
+        }
+        if (rows.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "请至少添加一项枚举选项");
         }
     }
 

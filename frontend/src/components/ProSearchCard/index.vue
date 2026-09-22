@@ -6,14 +6,14 @@
 <script setup lang="ts">
 /**
  * 高级搜索折叠卡
- * 筛选项与操作按钮分栏，筛选项按每行最多 3 个分排（超出自动换行）；
- * 无折叠行时，若默认筛选项超过一行则自动折叠并显示展开按钮
+ * 筛选项与操作按钮分栏，所有筛选项（默认插槽 + collapse 插槽）统一按每行最多 5 个分排；
+ * 超过 1 行（5 个）时收起为 1 行并显示"展开/收起"按钮
  */
-import { ref, computed, useSlots, onMounted, onBeforeUnmount, Comment, Fragment, Text } from 'vue'
+import { ref, useSlots, Comment, Fragment, Text } from 'vue'
 import type { VNode, FunctionalComponent } from 'vue'
 
 interface Props {
-  /** 是否折叠态（默认收起折叠行） */
+  /** 是否折叠态（收起时仅显示前 1 行） */
   defaultCollapsed?: boolean
   /** 查询按钮 loading */
   loading?: boolean
@@ -36,13 +36,14 @@ const emit = defineEmits<{
 }>()
 
 const slots = useSlots()
-const hasCollapse = computed(() => !!slots.collapse)
 const expanded = ref(!props.defaultCollapsed)
 
-// ===== 筛选项分行：一行最多 3 个 =====
+// ===== 筛选项分行：一行最多 5 个，收起时最多显示 1 行 =====
 
 /** 每行最多展示的筛选项数量 */
-const FIELDS_PER_ROW = 3
+const FIELDS_PER_ROW = 5
+/** 收起时最多显示的行数（超过则显示"展开/收起"按钮） */
+const MAX_VISIBLE_ROWS = 1
 
 /** 行渲染器：将一行内的筛选项 vnode 平铺渲染（Fragment） */
 const RowRender: FunctionalComponent<{ nodes: VNode[] }> = (rowProps) => rowProps.nodes
@@ -71,20 +72,17 @@ function collectFields(input: unknown, result: VNode[]): void {
   }
 }
 
-/** 将插槽内容按每行 3 个切分为多行，保证筛选栏一行最多显示 3 个筛选项 */
-function chunkRows(nodes: VNode[] | undefined): VNode[][] {
+/** 合并默认插槽与 collapse 插槽的筛选项，按每行 5 个切分为多行 */
+function chunkAllRows(): VNode[][] {
   const fields: VNode[] = []
-  collectFields(nodes, fields)
+  collectFields(slots.default?.(), fields)
+  collectFields(slots.collapse?.(), fields)
   const rows: VNode[][] = []
   for (let i = 0; i < fields.length; i += FIELDS_PER_ROW) {
     rows.push(fields.slice(i, i + FIELDS_PER_ROW))
   }
   return rows
 }
-
-const hasOverflow = ref(false)
-const everHadOverflow = ref(false)
-const fieldsRef = ref<HTMLElement>()
 
 function toggleExpand() {
   expanded.value = !expanded.value
@@ -95,57 +93,28 @@ function onSearch() {
 function onReset() {
   emit('reset')
 }
-
-function checkOverflow() {
-  const el = fieldsRef.value
-  if (!el) return
-  if (expanded.value || hasCollapse.value) {
-    hasOverflow.value = false
-    return
-  }
-  const overflow = el.scrollHeight > el.clientHeight + 1
-  hasOverflow.value = overflow
-  if (overflow) {
-    everHadOverflow.value = true
-  }
-}
-
-let ro: ResizeObserver | null = null
-onMounted(() => {
-  if (!fieldsRef.value) return
-  ro = new ResizeObserver(() => checkOverflow())
-  ro.observe(fieldsRef.value)
-  checkOverflow()
-})
-onBeforeUnmount(() => {
-  ro?.disconnect()
-})
 </script>
 
 <template>
   <div class="pro-search-card">
     <div class="pro-search-main">
-      <div
-        ref="fieldsRef"
-        class="pro-search-fields"
-        :class="{ collapsed: !expanded && !hasCollapse }"
-      >
-        <div v-for="(row, idx) in chunkRows(slots.default?.())" :key="idx" class="pro-search-row">
+      <div class="pro-search-fields">
+        <div
+          v-for="(row, idx) in chunkAllRows()"
+          v-show="expanded || idx < MAX_VISIBLE_ROWS"
+          :key="idx"
+          class="pro-search-row"
+        >
           <RowRender :nodes="row" />
         </div>
       </div>
       <div class="pro-search-actions">
         <el-button type="primary" :loading="loading" @click="onSearch">{{ searchText }}</el-button>
         <el-button @click="onReset">{{ resetText }}</el-button>
-        <el-button v-if="hasCollapse || everHadOverflow" link @click="toggleExpand">
+        <el-button v-if="chunkAllRows().length > MAX_VISIBLE_ROWS" link @click="toggleExpand">
           <span class="arrow" :class="{ expanded }">▾</span>
           <span>{{ expanded ? '收起' : '展开' }}</span>
         </el-button>
-      </div>
-    </div>
-    <div v-show="expanded && hasCollapse" class="pro-search-collapse">
-      <div v-for="(row, idx) in chunkRows(slots.collapse?.())" :key="idx" class="pro-search-row">
-        <RowRender :nodes="row" />
       </div>
     </div>
   </div>
@@ -171,11 +140,7 @@ onBeforeUnmount(() => {
   flex: 1;
   min-width: 0;
 }
-.pro-search-fields.collapsed {
-  max-height: 44px;
-  overflow: hidden;
-}
-/* 单行容器：一行最多 3 个筛选项，放不下时在行内换行（窄屏优雅降级） */
+/* 单行容器：一行最多 5 个筛选项，放不下时在行内换行（窄屏优雅降级） */
 .pro-search-row {
   display: flex;
   flex-wrap: wrap;
@@ -187,14 +152,6 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-}
-.pro-search-collapse {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  border-top: 1px dashed var(--el-border-color-lighter, #f0f0f0);
-  padding-top: 16px;
-  margin-top: 12px;
 }
 .arrow {
   display: inline-block;
