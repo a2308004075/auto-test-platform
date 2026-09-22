@@ -19,6 +19,7 @@ import { useProjectStore } from '@/stores'
 import { usePermission } from '@/composables/usePermission'
 import PageHeader from '@/components/PageHeader/index.vue'
 import TableFit from '@/components/TableFit/index.vue'
+import { toScopeList } from '@/utils/customFieldScope'
 
 const { hasPermission } = usePermission()
 const projectStore = useProjectStore()
@@ -81,18 +82,26 @@ const fieldTypeLabelMap: Record<string, string> = {
   environment: '环境选择',
 }
 
-// 显示位置选项/标签：按当前模块动态生成文案（缺陷/需求）
+// 显示位置：多选（create=新建显示 / detail=详情(编辑)显示），选项文案按当前模块动态生成（缺陷/需求）
 const moduleShortName = computed(() => (selectedModule.value === 'defect' ? '缺陷' : '需求'))
 const displayScopeOptions = computed(() => [
-  { label: '都显示', value: 'both' },
-  { label: `仅新建${moduleShortName.value}显示`, value: 'create' },
-  { label: `仅${moduleShortName.value}详情显示`, value: 'detail' },
+  { label: `新建${moduleShortName.value}`, value: 'create' },
+  { label: `${moduleShortName.value}详情`, value: 'detail' },
 ])
-const displayScopeLabelMap = computed<Record<string, string>>(() => ({
-  both: '都显示',
-  create: `仅新建${moduleShortName.value}显示`,
-  detail: `仅${moduleShortName.value}详情显示`,
-}))
+
+/** 列表"显示位置"标签：双值=都显示；单值=仅新建X显示 / 仅X详情显示 */
+function scopeLabel(scope: unknown): string {
+  const list = toScopeList(scope)
+  if (list.includes('create') && list.includes('detail')) return '都显示'
+  return list.includes('create') ? `仅新建${moduleShortName.value}显示` : `仅${moduleShortName.value}详情显示`
+}
+
+/** 列表"显示位置"标签颜色：新建=warning 详情=success 都显示=info */
+function scopeTagType(scope: unknown): 'warning' | 'success' | 'info' {
+  const list = toScopeList(scope)
+  if (list.includes('create') && list.includes('detail')) return 'info'
+  return list.includes('create') ? 'warning' : 'success'
+}
 
 // ===== 列表数据 =====
 const loading = ref(false)
@@ -110,9 +119,11 @@ const form = reactive({
   fieldType: 'text',
   description: '',
   optionsJson: '',
+  // 默认值 / 排序号已从弹窗表单移除（排序改由列表拖拽调整）：
+  // 仅保留属性用于编辑时回填原值随提交带回，避免被覆盖
   defaultValue: '',
   isRequired: 0,
-  displayScope: 'both',
+  displayScope: ['create', 'detail'],
   sortNo: 0,
 })
 
@@ -190,7 +201,7 @@ function resetForm() {
   form.optionsJson = ''
   form.defaultValue = ''
   form.isRequired = 0
-  form.displayScope = 'both'
+  form.displayScope = ['create', 'detail']
   form.sortNo = 0
   optionRows.value = []
 }
@@ -210,7 +221,7 @@ function openEdit(row: any) {
   form.optionsJson = row.optionsJson || ''
   form.defaultValue = row.defaultValue || ''
   form.isRequired = row.isRequired || 0
-  form.displayScope = row.displayScope || 'both'
+  form.displayScope = toScopeList(row.displayScope)
   form.sortNo = row.sortNo || 0
 
   // 解析已有选项（仅取显示文本；状态字段额外保留各选项原编码，改显示名不影响存储值）
@@ -256,6 +267,10 @@ async function handleSubmit() {
   }
   if (!form.fieldType) {
     ElMessage.warning('请选择字段类型')
+    return
+  }
+  if (!form.displayScope || form.displayScope.length === 0) {
+    ElMessage.warning('请至少选择一项显示位置')
     return
   }
 
@@ -452,11 +467,8 @@ async function handleDelete(row: any) {
                   </el-table-column>
                   <el-table-column label="显示位置" width="130" align="center">
                     <template #default="{ row }">
-                      <el-tag
-                        size="small"
-                        :type="row.displayScope === 'create' ? 'warning' : row.displayScope === 'detail' ? 'success' : 'info'"
-                      >
-                        {{ displayScopeLabelMap[row.displayScope] || '都显示' }}
+                      <el-tag size="small" :type="scopeTagType(row.displayScope)">
+                        {{ scopeLabel(row.displayScope) }}
                       </el-tag>
                     </template>
                   </el-table-column>
@@ -531,19 +543,13 @@ async function handleDelete(row: any) {
               <el-option v-for="t in fieldTypeOptions" :key="t.value" :value="t.value" :label="t.label" />
             </el-select>
           </el-form-item>
-          <el-form-item label="默认值">
-            <el-input v-model="form.defaultValue" placeholder="默认值（可选）" maxlength="200" />
-          </el-form-item>
           <el-form-item label="是否必填">
             <el-switch v-model="form.isRequired" :active-value="1" :inactive-value="0" />
           </el-form-item>
           <el-form-item label="显示位置">
-            <el-select v-model="form.displayScope" style="width: 100%">
+            <el-select v-model="form.displayScope" multiple placeholder="请选择显示位置" style="width: 100%">
               <el-option v-for="s in displayScopeOptions" :key="s.value" :value="s.value" :label="s.label" />
             </el-select>
-          </el-form-item>
-          <el-form-item label="排序号">
-            <el-input-number v-model="form.sortNo" :min="0" :controls="false" style="width: 120px" />
           </el-form-item>
 
           <!-- 描述（可选，最多 200 字，跨两列） -->

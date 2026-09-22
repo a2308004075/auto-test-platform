@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -48,10 +49,19 @@ public class CustomFieldService {
             "text", "textarea", "select", "datetime", "number", "user", "environment"));
 
     /**
-     * 合法的显示位置集合（both=都显示 create=仅新建显示 detail=仅详情(编辑)显示）
+     * 显示位置取值（新建在前、详情在后）：create=新建显示 detail=详情(编辑)显示
      */
-    private static final Set<String> VALID_DISPLAY_SCOPES = new HashSet<>(Arrays.asList(
-            "both", "create", "detail"));
+    private static final List<String> ALL_DISPLAY_SCOPES = Arrays.asList("create", "detail");
+
+    /**
+     * 合法的显示位置集合
+     */
+    private static final Set<String> VALID_DISPLAY_SCOPES = new HashSet<>(ALL_DISPLAY_SCOPES);
+
+    /**
+     * 显示位置缺省存储值（都显示）：新建 + 详情
+     */
+    private static final String DEFAULT_DISPLAY_SCOPE = String.join(",", ALL_DISPLAY_SCOPES);
 
     /**
      * 缺陷状态字段的固定 fieldKey：缺陷列表/详情页流转状态下拉框的选项来源
@@ -111,14 +121,13 @@ public class CustomFieldService {
         CustomField field = new CustomField();
         BeanUtils.copyProperties(request, field);
         field.setFieldKey("field_" + UUID.randomUUID().toString().replace("-", ""));
+        // displayScope 请求为列表、实体为逗号分隔字符串，类型不匹配不会被 copyProperties 复制，需手动转换
+        field.setDisplayScope(joinDisplayScopes(request.getDisplayScope()));
         if (field.getSortNo() == null) {
             field.setSortNo(0);
         }
         if (field.getIsRequired() == null) {
             field.setIsRequired(0);
-        }
-        if (field.getDisplayScope() == null || field.getDisplayScope().isEmpty()) {
-            field.setDisplayScope("both");
         }
         field.setIsActive(1);
         customFieldMapper.insert(field);
@@ -138,6 +147,11 @@ public class CustomFieldService {
         }
 
         BeanUtils.copyProperties(request, field);
+        // displayScope 需手动转换（类型不匹配不会被复制）；请求缺省（null/空）时保持原值不动
+        List<String> scopes = request.getDisplayScope();
+        if (scopes != null && !scopes.isEmpty()) {
+            field.setDisplayScope(joinDisplayScopes(scopes));
+        }
         customFieldMapper.updateById(field);
         return toListItem(field);
     }
@@ -160,6 +174,7 @@ public class CustomFieldService {
         field.setFieldType("select");
         field.setOptionsJson(DEFAULT_DEFECT_STATUS_OPTIONS_JSON);
         field.setIsRequired(0);
+        field.setDisplayScope(DEFAULT_DISPLAY_SCOPE);
         field.setSortNo(99);
         field.setIsActive(1);
         customFieldMapper.insert(field);
@@ -246,11 +261,42 @@ public class CustomFieldService {
             throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR,
                     "不支持的字段类型：" + type);
         }
-        String scope = request.getDisplayScope();
-        if (scope != null && !scope.isEmpty() && !VALID_DISPLAY_SCOPES.contains(scope)) {
-            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR,
-                    "不支持的显示位置：" + scope);
+        List<String> scopes = request.getDisplayScope();
+        if (scopes != null) {
+            for (String scope : scopes) {
+                if (!VALID_DISPLAY_SCOPES.contains(scope)) {
+                    throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR,
+                            "不支持的显示位置：" + scope);
+                }
+            }
         }
+    }
+
+    /**
+     * 显示位置列表 → 逗号分隔存储值（固定 create,detail 顺序；缺省或空集视为"都显示"）
+     */
+    private String joinDisplayScopes(List<String> scopes) {
+        if (scopes == null || scopes.isEmpty()) {
+            return DEFAULT_DISPLAY_SCOPE;
+        }
+        String joined = ALL_DISPLAY_SCOPES.stream()
+                .filter(scopes::contains)
+                .collect(Collectors.joining(","));
+        return joined.isEmpty() ? DEFAULT_DISPLAY_SCOPE : joined;
+    }
+
+    /**
+     * 逗号分隔存储值 → 显示位置列表（历史值 both 与空值兜底为"都显示"）
+     */
+    private List<String> splitDisplayScopes(String raw) {
+        if (raw == null || raw.isEmpty() || "both".equals(raw)) {
+            return new ArrayList<>(ALL_DISPLAY_SCOPES);
+        }
+        List<String> scopes = Arrays.stream(raw.split(","))
+                .map(String::trim)
+                .filter(scope -> !scope.isEmpty())
+                .collect(Collectors.toList());
+        return scopes.isEmpty() ? new ArrayList<>(ALL_DISPLAY_SCOPES) : scopes;
     }
 
     private CustomFieldListItem toListItem(CustomField field) {
@@ -266,7 +312,7 @@ public class CustomFieldService {
         item.setOptionsJson(field.getOptionsJson());
         item.setDefaultValue(field.getDefaultValue());
         item.setIsRequired(field.getIsRequired());
-        item.setDisplayScope(field.getDisplayScope());
+        item.setDisplayScope(splitDisplayScopes(field.getDisplayScope()));
         item.setSortNo(field.getSortNo());
         item.setIsActive(field.getIsActive());
         if (field.getCreatedAt() != null) {
@@ -287,7 +333,7 @@ public class CustomFieldService {
         dto.setOptionsJson(field.getOptionsJson());
         dto.setDefaultValue(field.getDefaultValue());
         dto.setIsRequired(field.getIsRequired());
-        dto.setDisplayScope(field.getDisplayScope());
+        dto.setDisplayScope(splitDisplayScopes(field.getDisplayScope()));
         dto.setSortNo(field.getSortNo());
         return dto;
     }

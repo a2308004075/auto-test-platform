@@ -7,6 +7,8 @@ package com.platform.sys.dto;
 
 import lombok.Data;
 
+import java.util.List;
+
 /**
  * 自定义字段列表项（管理页面展示用）
  */
@@ -24,7 +26,7 @@ public class CustomFieldListItem {
     private String optionsJson;
     private String defaultValue;
     private Integer isRequired;
-    private String displayScope;
+    private List<String> displayScope;
     private Integer sortNo;
     private Integer isActive;
     private String createdAt;

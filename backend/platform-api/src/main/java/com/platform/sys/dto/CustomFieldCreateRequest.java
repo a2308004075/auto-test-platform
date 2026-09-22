@@ -11,6 +11,8 @@ import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
 import javax.validation.constraints.Size;
 
+import java.util.List;
+
 /**
  * 自定义字段创建/更新请求
  */
@@ -69,9 +71,9 @@ public class CustomFieldCreateRequest {
     private Integer isRequired;
 
     /**
-     * 显示位置：both=都显示 create=仅新建显示 detail=仅详情(编辑)显示（缺省为 both）
+     * 显示位置（多值）：create=新建显示 detail=详情(编辑)显示（缺省为都显示）
      */
-    private String displayScope;
+    private List<String> displayScope;
 
     /**
      * 排序号

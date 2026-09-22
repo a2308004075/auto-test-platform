@@ -29,6 +29,7 @@ import CommentPanel from '@/components/CommentPanel/index.vue'
 import { getCustomFieldsForRender } from '@/api/customField'
 import { useDict } from '@/composables/useDict'
 import { useDefectStatusOptions } from '@/composables/useDefectStatus'
+import { isScopeVisible } from '@/utils/customFieldScope'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
 import '@wangeditor/editor/dist/css/style.css'
 
@@ -78,12 +79,9 @@ const fieldValues = ref<Record<string, any>>({})
 // 动态字段配置全量（【字段管理-缺陷字段】统一存 edit 视图；含全部显示位置，变更记录翻译用）
 const editFields = ref<any[]>([])
 
-/** 当前模式可见字段：按"显示位置"过滤（新建=both+create；详情=both+detail） */
+/** 当前模式可见字段：按"显示位置"过滤（新建=含"新建"位置；详情=含"详情"位置） */
 const visibleEditFields = computed(() =>
-  editFields.value.filter((f: any) => {
-    const scope = f.displayScope || 'both'
-    return isCreate.value ? scope !== 'detail' : scope !== 'create'
-  })
+  editFields.value.filter((f: any) => isScopeVisible(f.displayScope, isCreate.value ? 'create' : 'detail'))
 )
 
 // 关联（新建模式本页暂存随创建提交；详情模式实时增删）

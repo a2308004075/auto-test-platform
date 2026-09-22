@@ -21,6 +21,7 @@ import {
 import { getCustomFieldsForRender } from '@/api/customField'
 import PageHeader from '@/components/PageHeader/index.vue'
 import DynamicFieldGrid from '@/components/DynamicFieldGrid/index.vue'
+import { isScopeVisible } from '@/utils/customFieldScope'
 
 const route = useRoute()
 const router = useRouter()
@@ -38,12 +39,9 @@ const formRef = ref<FormInstance>()
 const customFields = ref<any[]>([])
 const customFieldValues = ref<Record<string, any>>({})
 
-/** 当前模式可见动态字段：按"显示位置"过滤（新建=both+create；编辑=both+detail） */
+/** 当前模式可见动态字段：按"显示位置"过滤（新建=含"新建"位置；编辑=含"详情"位置） */
 const visibleCustomFields = computed(() =>
-  customFields.value.filter((f: any) => {
-    const scope = f.displayScope || 'both'
-    return isNew.value ? scope !== 'detail' : scope !== 'create'
-  })
+  customFields.value.filter((f: any) => isScopeVisible(f.displayScope, isNew.value ? 'create' : 'detail'))
 )
 
 const form = reactive({
@@ -219,7 +217,7 @@ async function fetchCustomFields() {
           </div>
         </div>
 
-        <!-- 动态字段（按"显示位置"过滤：新建=both+create；编辑=both+detail） -->
+        <!-- 动态字段（按"显示位置"过滤：新建=含"新建"位置；编辑=含"详情"位置） -->
         <div v-if="visibleCustomFields.length > 0" class="form-section">
           <div class="form-section-title">字段信息</div>
           <DynamicFieldGrid

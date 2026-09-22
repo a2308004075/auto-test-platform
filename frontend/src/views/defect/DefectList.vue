@@ -22,6 +22,7 @@ import BatchBar from '@/components/BatchBar/index.vue'
 import ProPagination from '@/components/ProPagination/index.vue'
 import { useDefectStatusOptions } from '@/composables/useDefectStatus'
 import { getCustomFieldsForRender } from '@/api/customField'
+import { isScopeVisible } from '@/utils/customFieldScope'
 
 const route = useRoute()
 const router = useRouter()
@@ -353,7 +354,7 @@ function handleDelete(record: any) {
 // ===== 动态字段列（与详情页"字段信息"同源：【字段管理-缺陷字段】统一存 edit 视图） =====
 const displayFields = ref<any[]>([])
 
-/** 加载列表动态列：状态走专门列、多行文本内容长不进列表；"仅新建显示"字段不进列表（列表属查看场景，与详情一致） */
+/** 加载列表动态列：状态走专门列、多行文本内容长不进列表；不含"详情"位置的字段不进列表（列表属查看场景，与详情一致） */
 async function fetchDisplayFields() {
   try {
     const res: any = await getCustomFieldsForRender({
@@ -362,7 +363,7 @@ async function fetchDisplayFields() {
       viewType: 'edit',
     })
     displayFields.value = (res.data || []).filter(
-      (f: any) => f.fieldKey !== 'defect_status' && f.fieldType !== 'textarea' && (f.displayScope || 'both') !== 'create',
+      (f: any) => f.fieldKey !== 'defect_status' && f.fieldType !== 'textarea' && isScopeVisible(f.displayScope, 'detail'),
     )
   } catch { displayFields.value = [] }
 }

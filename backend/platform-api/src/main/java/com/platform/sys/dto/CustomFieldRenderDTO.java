@@ -29,9 +29,9 @@ public class CustomFieldRenderDTO {
     private String defaultValue;
     private Integer isRequired;
     /**
-     * 显示位置：both=都显示 create=仅新建显示 detail=仅详情(编辑)显示
+     * 显示位置（多值）：create=新建显示 detail=详情(编辑)显示
      */
-    private String displayScope;
+    private List<String> displayScope;
     private Integer sortNo;
 
     /**
