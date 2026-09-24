@@ -16,7 +16,6 @@ import com.platform.common.exception.ErrorCode;
 import com.platform.common.response.PageResponse;
 import com.platform.execution.dto.AutoSuiteBriefDTO;
 import com.platform.execution.dto.ManualCaseBriefDTO;
-import com.platform.execution.dto.PlanCaseFieldUpdateRequest;
 import com.platform.execution.dto.PlanCreateRequest;
 import com.platform.execution.dto.PlanResponse;
 import com.platform.execution.dto.PlanUpdateRequest;
@@ -25,7 +24,6 @@ import com.platform.execution.mapper.*;
 import com.platform.environment.entity.Environment;
 import com.platform.environment.mapper.EnvironmentMapper;
 import com.platform.project.service.ProjectService;
-import com.platform.sys.service.CustomFieldValueService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
@@ -51,11 +49,6 @@ import java.util.stream.Collectors;
 @Slf4j
 public class PlanService {
 
-    /**
-     * 计划-用例关联级动态字段模块标识（sys_custom_field.module，entity_id=test_plan_manual_case.id）
-     */
-    private static final String PLAN_CASE_FIELD_MODULE = "plan_case";
-
     private final TestPlanMapper testPlanMapper;
     private final PlanGroupMapper planGroupMapper;
     private final ProjectService projectService;
@@ -65,7 +58,6 @@ public class PlanService {
     private final AutoCaseMapper autoCaseMapper;
     private final ManualCaseMapper manualCaseMapper;
     private final TestPlanManualCaseMapper testPlanManualCaseMapper;
-    private final CustomFieldValueService customFieldValueService;
     private final ObjectMapper objectMapper;
 
     /**
@@ -266,12 +258,11 @@ public class PlanService {
     }
 
     /**
-     * 删除测试计划（关联行由外键级联删除，关联级字段值需显式清理）
+     * 删除测试计划（关联行与执行记录由外键级联删除）
      */
     @Transactional(rollbackFor = Exception.class)
     public void deletePlan(Long planId) {
         findById(planId);
-        deletePlanCaseFieldValues(Collections.singletonList(planId));
         testPlanMapper.deleteById(planId);
     }
 
@@ -305,48 +296,10 @@ public class PlanService {
     }
 
     /**
-     * 按条件删除计划前，先显式清理计划-用例关联行上的动态字段值
-     * （关联行本身由外键级联随计划删除，sys_custom_field_value 无外键需显式清理）
+     * 按条件删除计划（计划-用例关联行与执行记录均由外键级联随计划删除）
      */
     private void deletePlansWithCaseFieldValues(LambdaQueryWrapper<TestPlan> wrapper) {
-        wrapper.select(TestPlan::getId);
-        List<Long> planIds = testPlanMapper.selectList(wrapper).stream()
-                .map(TestPlan::getId)
-                .collect(Collectors.toList());
-        deletePlanCaseFieldValues(planIds);
         testPlanMapper.delete(wrapper);
-    }
-
-    /**
-     * 批量清理计划用例关联行上的动态字段值（module=plan_case）
-     */
-    private void deletePlanCaseFieldValues(List<Long> planIds) {
-        if (planIds == null || planIds.isEmpty()) {
-            return;
-        }
-        LambdaQueryWrapper<TestPlanManualCase> relWrapper = new LambdaQueryWrapper<>();
-        relWrapper.in(TestPlanManualCase::getPlanId, planIds)
-                .select(TestPlanManualCase::getId);
-        List<Long> relationIds = testPlanManualCaseMapper.selectList(relWrapper).stream()
-                .map(TestPlanManualCase::getId)
-                .collect(Collectors.toList());
-        customFieldValueService.deleteByEntities(PLAN_CASE_FIELD_MODULE, relationIds);
-    }
-
-    /**
-     * 更新计划关联用例的动态字段值（行内即时保存，如台架是否执行/整站是否执行）
-     *
-     * @param relationId 计划-用例关联行 ID（test_plan_manual_case.id）
-     */
-    @Transactional(rollbackFor = Exception.class)
-    public void updateCaseFieldValues(Long planId, Long relationId, PlanCaseFieldUpdateRequest request) {
-        TestPlan plan = findById(planId);
-        TestPlanManualCase relation = testPlanManualCaseMapper.selectById(relationId);
-        if (relation == null || !planId.equals(relation.getPlanId())) {
-            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "计划用例关联不存在：" + relationId);
-        }
-        customFieldValueService.saveValues(plan.getProjectId(), PLAN_CASE_FIELD_MODULE, "edit",
-                relationId, request.getFieldValues());
     }
 
     private TestPlan findById(Long planId) {
@@ -397,16 +350,11 @@ public class PlanService {
         resp.setCaseCount(caseCount);
         resp.setAutoSuiteDetails(autoSuiteDetails);
 
-        // 获取手动化用例名称列表与明细（关联表为权威读源，含关联级动态字段值）
+        // 获取手动化用例名称列表与明细（关联表为权威读源）
         List<TestPlanManualCase> caseRelations = listCaseRelations(plan.getId());
         List<Long> manualCaseIdList = caseRelations.stream()
                 .map(TestPlanManualCase::getManualCaseId)
                 .collect(Collectors.toList());
-        List<Long> relationIds = caseRelations.stream()
-                .map(TestPlanManualCase::getId)
-                .collect(Collectors.toList());
-        Map<Long, Map<String, String>> fieldValuesByRelation =
-                customFieldValueService.loadValuesBatch(plan.getProjectId(), PLAN_CASE_FIELD_MODULE, relationIds);
         List<String> manualCaseNames = new ArrayList<>();
         List<ManualCaseBriefDTO> manualCaseDetails = new ArrayList<>();
         for (TestPlanManualCase relation : caseRelations) {
@@ -417,9 +365,6 @@ public class PlanService {
                 caseBrief.setId(manualCase.getId());
                 caseBrief.setTitle(manualCase.getTitle());
                 caseBrief.setCaseStatus(manualCase.getCaseStatus());
-                caseBrief.setRelationId(relation.getId());
-                caseBrief.setFieldValues(fieldValuesByRelation.getOrDefault(
-                        relation.getId(), Collections.emptyMap()));
                 manualCaseDetails.add(caseBrief);
             }
         }
@@ -493,13 +438,12 @@ public class PlanService {
         // 新列表去重（保持提交顺序）
         List<Long> distinctIds = caseIds.stream().distinct().collect(Collectors.toList());
 
-        // 删除：不在新列表中的关联行 + 其关联级字段值
+        // 删除：不在新列表中的关联行（关联行由差集直接删除）
         List<Long> removedRelationIds = existing.stream()
                 .filter(r -> !distinctIds.contains(r.getManualCaseId()))
                 .map(TestPlanManualCase::getId)
                 .collect(Collectors.toList());
         if (!removedRelationIds.isEmpty()) {
-            customFieldValueService.deleteByEntities(PLAN_CASE_FIELD_MODULE, removedRelationIds);
             testPlanManualCaseMapper.deleteBatchIds(removedRelationIds);
         }
 

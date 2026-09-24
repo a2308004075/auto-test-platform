@@ -14,8 +14,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { getPlan, updatePlan, updatePlanCaseFields } from '@/api/plan'
-import { getCustomFieldsForRender } from '@/api/customField'
+import { getPlan, updatePlan } from '@/api/plan'
 import EditPageHeader from '@/components/EditPageHeader/index.vue'
 import CaseSelectDialog from '@/components/CaseSelectDialog/index.vue'
 import AutoSuiteSelectDialog from '@/components/AutoSuiteSelectDialog/index.vue'
@@ -111,80 +110,12 @@ function handleRemoveSuite(row: any) {
   saveRelationIds({ autoSuiteIds: next }, `已移除套件「${row.name}」`)
 }
 
-// ===== 关联用例动态字段（【页面配置-测试计划】配置，行内设置即时保存） =====
-const caseFields = ref<any[]>([])
-// 行级字段保存中状态（key = relationId:fieldKey，保存期间禁用对应控件防连点）
-const caseFieldSaving = reactive<Record<string, boolean>>({})
-
-async function loadCaseFields() {
-  try {
-    const res: any = await getCustomFieldsForRender({
-      projectId: projectId.value,
-      module: 'plan_case',
-      viewType: 'edit',
-    })
-    caseFields.value = res.data || []
-  } catch {
-    caseFields.value = []
-  }
-}
-
-/** 行内字段显示值：已保存值优先，未设置时回退字段默认值（仅展示，用户改动才写库） */
-function caseFieldValue(row: any, field: any): string {
-  const saved = row.fieldValues?.[field.fieldKey]
-  if (saved !== undefined && saved !== null && saved !== '') {
-    return saved
-  }
-  return field.defaultValue || ''
-}
-
-/** 下拉类控件选项（select 静态选项 / user 用户 / environment 环境由后端统一组装） */
-function caseFieldOptions(field: any): Array<{ label: string; value: string }> {
-  return field.options || []
-}
-
-function isSelectLikeField(field: any): boolean {
-  return ['select', 'user', 'environment'].includes(field.fieldType)
-}
-
-function isCaseFieldSaving(row: any, field: any): boolean {
-  return !!caseFieldSaving[`${row.relationId}:${field.fieldKey}`]
-}
-
-/** 行内字段值变更：即时保存（仅提交变更的单个字段，对齐关联内容即时保存语义） */
-async function handleCaseFieldChange(row: any, field: any, value: string | number | null) {
-  if (!row.relationId) {
-    ElMessage.warning('关联信息加载中，请稍后重试')
-    return
-  }
-  const saveKey = `${row.relationId}:${field.fieldKey}`
-  const val = value === null || value === undefined ? '' : String(value)
-  caseFieldSaving[saveKey] = true
-  try {
-    await updatePlanCaseFields(planId.value, row.relationId, { [field.fieldKey]: val })
-    if (!row.fieldValues) {
-      row.fieldValues = {}
-    }
-    if (val === '') {
-      delete row.fieldValues[field.fieldKey]
-    } else {
-      row.fieldValues[field.fieldKey] = val
-    }
-    ElMessage.success(`「${row.title}」${field.fieldLabel} 已更新`)
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.message || '保存失败')
-  } finally {
-    delete caseFieldSaving[saveKey]
-  }
-}
-
 function goBack() {
   router.push(`/project/${projectId.value}/plans`)
 }
 
 onMounted(() => {
   fetchPlan()
-  loadCaseFields()
 })
 </script>
 
@@ -209,55 +140,6 @@ onMounted(() => {
                 <el-tag :type="row.caseStatus === 1 ? 'success' : 'info'" size="small">
                   {{ row.caseStatus === 1 ? '使用' : '废弃' }}
                 </el-tag>
-              </template>
-            </el-table-column>
-            <!-- 关联用例动态字段列（【页面配置-测试计划】配置，行内设置即时保存） -->
-            <el-table-column
-              v-for="f in caseFields"
-              :key="f.fieldKey"
-              :label="f.fieldLabel"
-              :width="isSelectLikeField(f) ? 130 : 180"
-              align="center"
-            >
-              <template #default="{ row }">
-                <el-select
-                  v-if="isSelectLikeField(f)"
-                  :model-value="caseFieldValue(row, f)"
-                  :disabled="isCaseFieldSaving(row, f)"
-                  style="width: 110px"
-                  @change="handleCaseFieldChange(row, f, $event)"
-                >
-                  <el-option
-                    v-for="opt in caseFieldOptions(f)"
-                    :key="opt.value"
-                    :value="opt.value"
-                    :label="opt.label"
-                  />
-                </el-select>
-                <el-date-picker
-                  v-else-if="f.fieldType === 'datetime'"
-                  :model-value="caseFieldValue(row, f) || null"
-                  type="datetime"
-                  value-format="YYYY-MM-DD HH:mm"
-                  :disabled="isCaseFieldSaving(row, f)"
-                  style="width: 175px"
-                  @change="handleCaseFieldChange(row, f, $event)"
-                />
-                <el-input-number
-                  v-else-if="f.fieldType === 'number'"
-                  :model-value="caseFieldValue(row, f) === '' ? undefined : Number(caseFieldValue(row, f))"
-                  :controls="false"
-                  :disabled="isCaseFieldSaving(row, f)"
-                  style="width: 160px"
-                  @change="handleCaseFieldChange(row, f, $event)"
-                />
-                <el-input
-                  v-else
-                  :model-value="caseFieldValue(row, f)"
-                  :disabled="isCaseFieldSaving(row, f)"
-                  style="width: 160px"
-                  @change="handleCaseFieldChange(row, f, $event)"
-                />
               </template>
             </el-table-column>
             <el-table-column label="操作" width="80" align="center">

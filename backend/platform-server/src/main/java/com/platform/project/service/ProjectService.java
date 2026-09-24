@@ -189,9 +189,6 @@ public class ProjectService {
         // 预置手动用例"状态"字段（【页面配置-手动用例字段】视图，详情页状态下拉框的选项来源）
         customFieldService.createDefaultManualCaseStatusField(project.getId());
 
-        // 预置【测试计划-关联用例】字段（台架是否执行/整站是否执行，计划详情页关联用例表格行内设置）
-        customFieldService.createDefaultPlanCaseFields(project.getId());
-
         return toResponse(project);
     }
 

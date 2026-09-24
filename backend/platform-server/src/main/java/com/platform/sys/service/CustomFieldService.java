@@ -226,44 +226,6 @@ public class CustomFieldService {
     }
 
     /**
-     * 为项目预置【测试计划-关联用例】字段（台架是否执行/整站是否执行）
-     *
-     * <p>新建项目时调用：关联级动态字段（module=plan_case，值挂 test_plan_manual_case 关联行），
-     * 用于手动测试计划详情页关联用例表格的行内设置；仅记录展示，不影响执行引擎
-     */
-    @Transactional(rollbackFor = Exception.class)
-    public void createDefaultPlanCaseFields(Long projectId) {
-        createPlanCaseField(projectId, "run_on_bench", "台架是否执行",
-                "手动测试计划中该用例是否在台架环境执行（仅记录展示，不影响执行引擎）",
-                "[{\"label\":\"是\",\"value\":\"1\"},{\"label\":\"否\",\"value\":\"0\"}]", "1", 1);
-        createPlanCaseField(projectId, "run_on_site", "整站是否执行",
-                "手动测试计划中该用例是否在整站环境执行（仅记录展示，不影响执行引擎）",
-                "[{\"label\":\"是\",\"value\":\"1\"},{\"label\":\"否\",\"value\":\"0\"}]", "1", 2);
-    }
-
-    /**
-     * 预置单个【测试计划-关联用例】字段（统一存 edit 视图，仅详情显示）
-     */
-    private void createPlanCaseField(Long projectId, String fieldKey, String fieldLabel,
-                                     String description, String optionsJson, String defaultValue, int sortNo) {
-        CustomField field = new CustomField();
-        field.setProjectId(projectId);
-        field.setModule("plan_case");
-        field.setViewType("edit");
-        field.setFieldKey(fieldKey);
-        field.setFieldLabel(fieldLabel);
-        field.setDescription(description);
-        field.setFieldType("select");
-        field.setOptionsJson(optionsJson);
-        field.setDefaultValue(defaultValue);
-        field.setIsRequired(0);
-        field.setDisplayScope("detail");
-        field.setSortNo(sortNo);
-        field.setIsActive(1);
-        customFieldMapper.insert(field);
-    }
-
-    /**
      * 预置模块"状态"字段（统一存 edit 视图）
      *
      * <p>状态字段系统预置为必填、显示位置固定为"详情"，且固定排第一位（列表展示与拖拽均锁定位置）

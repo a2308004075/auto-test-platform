@@ -7,7 +7,6 @@ package com.platform.execution.controller;
 
 import com.platform.common.response.ApiResponse;
 import com.platform.common.response.PageResponse;
-import com.platform.execution.dto.PlanCaseFieldUpdateRequest;
 import com.platform.execution.dto.PlanCreateRequest;
 import com.platform.execution.dto.PlanResponse;
 import com.platform.execution.dto.PlanUpdateRequest;
@@ -82,19 +81,6 @@ public class PlanController {
     @PostMapping("/api/v1/plans/{planId}/delete")
     public ApiResponse<Void> delete(@PathVariable Long planId) {
         planService.deletePlan(planId);
-        return ApiResponse.ok();
-    }
-
-    /**
-     * 更新计划关联用例的动态字段值（详情页用例表格行内即时保存，如台架是否执行/整站是否执行）
-     *
-     * @param relationId 计划-用例关联行 ID（test_plan_manual_case.id）
-     */
-    @PostMapping("/api/v1/plans/{planId}/cases/{relationId}/fields")
-    public ApiResponse<Void> updateCaseFields(@PathVariable Long planId,
-                                              @PathVariable Long relationId,
-                                              @RequestBody PlanCaseFieldUpdateRequest request) {
-        planService.updateCaseFieldValues(planId, relationId, request);
         return ApiResponse.ok();
     }
 }
