@@ -7,6 +7,7 @@ package com.platform.execution.controller;
 
 import com.platform.common.response.ApiResponse;
 import com.platform.common.response.PageResponse;
+import com.platform.execution.dto.ManualCaseAttachmentResponse;
 import com.platform.execution.dto.ManualCaseCreateRequest;
 import com.platform.execution.dto.ManualCaseResponse;
 import com.platform.execution.dto.ManualCaseUpdateRequest;
@@ -33,12 +34,11 @@ public class ManualCaseController {
     public ApiResponse<PageResponse<ManualCaseResponse>> list(@PathVariable Long projectId,
                                                                @RequestParam(required = false) Long groupId,
                                                                @RequestParam(required = false) String keyword,
-                                                               @RequestParam(required = false) String priority,
-                                                               @RequestParam(required = false) String caseType,
                                                                @RequestParam(required = false) String caseStatus,
+                                                               @RequestParam(required = false) String customFilters,
                                                                @RequestParam(defaultValue = "1") int page,
                                                                @RequestParam(defaultValue = "20") int pageSize) {
-        return ApiResponse.ok(manualCaseService.listCases(projectId, groupId, keyword, priority, caseType, caseStatus, page, pageSize));
+        return ApiResponse.ok(manualCaseService.listCases(projectId, groupId, keyword, caseStatus, customFilters, page, pageSize));
     }
 
     /**
@@ -80,11 +80,37 @@ public class ManualCaseController {
     }
 
     /**
-     * 启用/废弃手动化用例
+     * 启用/废弃手动化用例（targetStatus 为空时按当前值取反）
      */
     @PostMapping("/{caseId}/status")
     public ApiResponse<ManualCaseResponse> toggleStatus(@PathVariable Long projectId,
-                                                         @PathVariable Long caseId) {
-        return ApiResponse.ok(manualCaseService.toggleStatus(caseId));
+                                                         @PathVariable Long caseId,
+                                                         @RequestParam(required = false) Integer targetStatus) {
+        return ApiResponse.ok(manualCaseService.toggleStatus(caseId, targetStatus));
+    }
+
+    // ───────────── 附件 ─────────────
+
+    /**
+     * 添加附件记录
+     */
+    @PostMapping("/{caseId}/attachments")
+    public ApiResponse<ManualCaseAttachmentResponse> addAttachment(@PathVariable Long projectId,
+                                                                    @PathVariable Long caseId,
+                                                                    @RequestParam String fileName,
+                                                                    @RequestParam String fileUrl,
+                                                                    @RequestParam(required = false) Long fileSize) {
+        return ApiResponse.ok(manualCaseService.addAttachment(projectId, caseId, fileName, fileUrl, fileSize));
+    }
+
+    /**
+     * 删除附件
+     */
+    @PostMapping("/{caseId}/attachments/{attachmentId}/delete")
+    public ApiResponse<Void> deleteAttachment(@PathVariable Long projectId,
+                                               @PathVariable Long caseId,
+                                               @PathVariable Long attachmentId) {
+        manualCaseService.deleteAttachment(projectId, caseId, attachmentId);
+        return ApiResponse.ok();
     }
 }

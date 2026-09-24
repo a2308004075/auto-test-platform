@@ -26,6 +26,11 @@ public class RequirementItemCreateRequest {
 
     private String description;
 
+    /**
+     * 需求内容（富文本 HTML，与缺陷/手动用例"内容"一致）
+     */
+    private String content;
+
     private String reqType;
 
     private String priority;
@@ -38,7 +43,7 @@ public class RequirementItemCreateRequest {
     private LocalDate deadline;
 
     /**
-     * 自定义字段值（fieldKey -> 字段值，由【字段管理】动态配置驱动）
+     * 自定义字段值（fieldKey -> 字段值，由【页面配置】动态配置驱动）
      */
     private Map<String, String> customFields;
 }

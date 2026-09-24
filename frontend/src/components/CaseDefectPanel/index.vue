@@ -32,7 +32,7 @@ const relationTypeLabelMap = computed(() => {
   return map
 })
 
-// 状态选项优先读【字段管理-缺陷字段】的"状态"字段配置（按项目），无配置回退字典
+// 状态选项优先读【页面配置-缺陷字段】的"状态"字段配置（按项目），无配置回退字典
 const { options: statusOptions } = useDefectStatusOptions(() => props.projectId)
 const statusLabelMap = computed(() => {
   const map: Record<string, string> = {}

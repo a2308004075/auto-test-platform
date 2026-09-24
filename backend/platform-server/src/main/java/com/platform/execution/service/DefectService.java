@@ -62,7 +62,7 @@ public class DefectService {
     private final CommentService commentService;
     private final CustomFieldMapper customFieldMapper;
 
-    /** 内置状态集合（回退用）：项目未在【字段管理-编辑缺陷】配置"状态"字段时的合法状态 */
+    /** 内置状态集合（回退用）：项目未在【页面配置-编辑缺陷】配置"状态"字段时的合法状态 */
     private static final Set<String> VALID_STATUSES = new HashSet<>(Arrays.asList(
             "NEW", "TO_CONFIRM", "FIXING", "TO_DEPLOY", "PENDING", "COMPLETED", "REOPENED", "DEFERRED", "CLOSED"));
     private static final Set<String> HISTORY_FIELDS = new HashSet<>(Arrays.asList(
@@ -113,13 +113,13 @@ public class DefectService {
             LocalDateTime end = parseFilterDate(createdAtEnd);
             wrapper.lt(end != null, Defect::getCreatedAt, end == null ? null : end.plusDays(1));
         }
-        // 动态字段筛选（【字段管理-编辑缺陷】视图的列作为筛选项）
+        // 动态字段筛选（【页面配置-编辑缺陷】视图的列作为筛选项）
         applyCustomFieldFilters(projectId, wrapper, customFilters);
         wrapper.orderByDesc(Defect::getCreatedAt);
 
         Page<Defect> result = defectMapper.selectPage(new Page<>(page, pageSize), wrapper);
         List<Defect> defects = result.getRecords();
-        // 批量加载自定义字段值（由【字段管理】动态配置驱动，列表页动态列展示用），避免逐条 N+1 查询
+        // 批量加载自定义字段值（由【页面配置】动态配置驱动，列表页动态列展示用），避免逐条 N+1 查询
         Map<Long, Map<String, String>> customValues = customFieldValueService.loadValuesBatch(
                 projectId, "defect", defects.stream().map(Defect::getId).collect(Collectors.toList()));
         List<DefectResponse> records = new ArrayList<>(defects.size());
@@ -235,7 +235,7 @@ public class DefectService {
         resp.setRelations(loadRelations(defectId));
         resp.setAttachments(loadAttachments(defectId));
         resp.setHistories(loadHistories(defectId));
-        // 自定义字段值（由【字段管理】动态配置驱动）
+        // 自定义字段值（由【页面配置】动态配置驱动）
         resp.setCustomFields(customFieldValueService.loadValues(defect.getProjectId(), "defect", defectId));
         return resp;
     }
@@ -271,7 +271,7 @@ public class DefectService {
             }
         }
 
-        // 保存自定义字段值（新建/详情统一使用【字段管理-编辑缺陷】视图配置）
+        // 保存自定义字段值（新建/详情统一使用【页面配置-编辑缺陷】视图配置）
         customFieldValueService.saveValues(projectId, "defect", "edit", defect.getId(), request.getCustomFields());
         return toListResponse(defect);
     }
@@ -291,7 +291,7 @@ public class DefectService {
         Map<String, String> newValues = captureSnapshot(defect);
         saveHistories(defect.getId(), oldValues, newValues);
 
-        // 保存自定义字段值（由【字段管理】动态配置驱动），前后对比记录变更
+        // 保存自定义字段值（由【页面配置】动态配置驱动），前后对比记录变更
         Map<String, String> oldCustomValues = request.getCustomFields() != null
                 ? customFieldValueService.loadValues(defect.getProjectId(), "defect", defectId)
                 : null;
@@ -322,7 +322,7 @@ public class DefectService {
     public DefectResponse transitionStatus(Long projectId, Long defectId, DefectStatusTransitionRequest request) {
         Defect defect = findByIdAndProject(projectId, defectId);
         String targetStatus = request.getTargetStatus();
-        // 合法状态优先取【字段管理-编辑缺陷】的"状态"字段配置（按项目），无配置回退内置集合
+        // 合法状态优先取【页面配置-编辑缺陷】的"状态"字段配置（按项目），无配置回退内置集合
         if (!loadValidStatuses(defect.getProjectId()).contains(targetStatus)) {
             throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "无效的状态：" + targetStatus);
         }
@@ -346,7 +346,7 @@ public class DefectService {
     }
 
     /**
-     * 项目可用状态集合：读【字段管理-编辑缺陷】"状态"字段（fieldKey=defect_status）的选项 value，
+     * 项目可用状态集合：读【页面配置-编辑缺陷】"状态"字段（fieldKey=defect_status）的选项 value，
      * 无配置或解析失败时回退内置 VALID_STATUSES
      */
     private Set<String> loadValidStatuses(Long projectId) {

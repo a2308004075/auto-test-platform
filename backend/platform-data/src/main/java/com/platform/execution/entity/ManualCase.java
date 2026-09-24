@@ -14,7 +14,7 @@ import lombok.EqualsAndHashCode;
  * 手动化用例实体
  *
  * <p>对应数据库 manual_case 表。用户手动编写的测试用例，
- * 包含标题、前置条件、操作步骤、预期结果等字段。
+ * 包含标题、内容（富文本，统一维护前置条件/操作步骤/预期结果）等字段。
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -37,19 +37,9 @@ public class ManualCase extends BaseEntity {
     private String title;
 
     /**
-     * 前置条件
+     * 用例内容（富文本：前置条件/操作步骤/预期结果统一在一个编辑器维护，参考缺陷"内容"）
      */
-    private String preconditions;
-
-    /**
-     * 操作步骤
-     */
-    private String operationSteps;
-
-    /**
-     * 预期结果
-     */
-    private String expectedResult;
+    private String content;
 
     /**
      * 用例类型：NORMAL-正常，EXCEPTION-异常

@@ -263,11 +263,19 @@ public class AiWhiteboxService {
 
             ManualCaseCreateRequest createRequest = new ManualCaseCreateRequest();
             createRequest.setTitle(test.getCaseTitle());
-            createRequest.setPreconditions(test.getPreconditions());
-            createRequest.setOperationSteps(test.getOperationSteps());
-            createRequest.setExpectedResult(test.getExpectedResult());
-            createRequest.setCaseType(test.getCaseType());
-            createRequest.setPriority(test.getPriority());
+            // 手动用例已合并为单一富文本"内容"字段：AI 生成的三段统一编排保存
+            createRequest.setContent(buildCaseContent(test.getPreconditions(), test.getOperationSteps(), test.getExpectedResult()));
+            // 用例类型/优先级为动态字段（由【页面配置】驱动），值写入 sys_custom_field_value
+            java.util.Map<String, String> customFields = new java.util.HashMap<>();
+            if (StringUtils.hasText(test.getCaseType())) {
+                customFields.put("case_type", test.getCaseType());
+            }
+            if (StringUtils.hasText(test.getPriority())) {
+                customFields.put("priority", test.getPriority());
+            }
+            if (!customFields.isEmpty()) {
+                createRequest.setCustomFields(customFields);
+            }
             ManualCaseResponse created = manualCaseService.createCase(projectId, createRequest);
 
             test.setSavedToManual(1);
@@ -278,6 +286,30 @@ public class AiWhiteboxService {
 
         log.info("白盒任务 {} 保存 {} 个用例到手动用例库", taskId, savedCaseIds.size());
         return savedCaseIds;
+    }
+
+    /**
+     * 组装用例内容（富文本）：AI 生成的 前置条件/操作步骤/预期结果 三段统一编排，
+     * 与手动用例 content 单字段（V72 合并三列）对齐；三段均为空时返回 null
+     */
+    private String buildCaseContent(String preconditions, String operationSteps, String expectedResult) {
+        StringBuilder sb = new StringBuilder();
+        if (StringUtils.hasText(preconditions)) {
+            sb.append("<p><strong>【前置条件】</strong></p><p>").append(toRichTextParagraph(preconditions)).append("</p>");
+        }
+        if (StringUtils.hasText(operationSteps)) {
+            sb.append("<p><strong>【操作步骤】</strong></p><p>").append(toRichTextParagraph(operationSteps)).append("</p>");
+        }
+        if (StringUtils.hasText(expectedResult)) {
+            sb.append("<p><strong>【预期结果】</strong></p><p>").append(toRichTextParagraph(expectedResult)).append("</p>");
+        }
+        return sb.length() > 0 ? sb.toString() : null;
+    }
+
+    /** 纯文本 HTML 转义后换行转 <br>（嵌入富文本段落用） */
+    private String toRichTextParagraph(String text) {
+        String escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        return escaped.replace("\r\n", "<br>").replace("\n", "<br>");
     }
 
     /**

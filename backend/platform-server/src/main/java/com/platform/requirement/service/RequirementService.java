@@ -169,7 +169,7 @@ public class RequirementService {
     public RequirementItemResponse getItem(Long itemId) {
         RequirementItem item = findItemById(itemId);
         RequirementItemResponse resp = toItemResponse(item);
-        // 自定义字段值（由【字段管理】动态配置驱动，按所属版本定位项目）
+        // 自定义字段值（由【页面配置】动态配置驱动，按所属版本定位项目）
         RequirementVersion version = findVersionById(item.getVersionId());
         resp.setCustomFields(customFieldValueService.loadValues(version.getProjectId(), "requirement", itemId));
         return resp;
@@ -205,6 +205,7 @@ public class RequirementService {
         item.setVersionId(request.getVersionId());
         item.setTitle(request.getTitle());
         item.setDescription(request.getDescription());
+        item.setContent(request.getContent());
         item.setReqType(request.getReqType() != null ? request.getReqType() : "FEATURE");
         item.setPriority(request.getPriority() != null ? request.getPriority() : "MEDIUM");
         item.setStatus(request.getStatus() != null ? request.getStatus() : "PENDING");
@@ -221,7 +222,7 @@ public class RequirementService {
 
         itemMapper.insert(item);
 
-        // 保存自定义字段值（新建/编辑统一使用【字段管理】需求单视图配置）
+        // 保存自定义字段值（新建/编辑统一使用【页面配置】需求单视图配置）
         customFieldValueService.saveValues(version.getProjectId(), "requirement", "edit", item.getId(), request.getCustomFields());
 
         // 知识库同步：条目变更归入所属版本重新采集
@@ -240,6 +241,7 @@ public class RequirementService {
         // 记录变更前值
         String oldTitle = item.getTitle();
         String oldDescription = item.getDescription();
+        String oldContent = item.getContent();
         String oldReqType = item.getReqType();
         String oldPriority = item.getPriority();
         String oldStatus = item.getStatus();
@@ -248,6 +250,7 @@ public class RequirementService {
 
         item.setTitle(request.getTitle());
         item.setDescription(request.getDescription());
+        item.setContent(request.getContent());
         if (request.getReqType() != null) {
             item.setReqType(request.getReqType());
         }
@@ -266,6 +269,7 @@ public class RequirementService {
         ChangeLogHelper.collect(BizType.REQUIREMENT_ITEM, itemId, changeLogService)
                 .compare("title", oldTitle, item.getTitle())
                 .compare("description", oldDescription, item.getDescription())
+                .compare("content", oldContent, item.getContent())
                 .compare("reqType", oldReqType, item.getReqType())
                 .compare("priority", oldPriority, item.getPriority())
                 .compare("status", oldStatus, item.getStatus())
@@ -273,7 +277,7 @@ public class RequirementService {
                 .compare("deadline", oldDeadline, item.getDeadline())
                 .save();
 
-        // 保存自定义字段值（由【字段管理】动态配置驱动）
+        // 保存自定义字段值（由【页面配置】动态配置驱动）
         RequirementVersion version = findVersionById(item.getVersionId());
         customFieldValueService.saveValues(version.getProjectId(), "requirement", "edit", itemId, request.getCustomFields());
 
@@ -371,6 +375,7 @@ public class RequirementService {
         resp.setVersionId(item.getVersionId());
         resp.setTitle(item.getTitle());
         resp.setDescription(item.getDescription());
+        resp.setContent(item.getContent());
         resp.setReqType(item.getReqType());
         resp.setPriority(item.getPriority());
         resp.setStatus(item.getStatus());

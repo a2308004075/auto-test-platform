@@ -73,7 +73,8 @@ async function fetchList() {
       list.value = (res.data?.items || []).map((item: any) => ({
         id: item.id,
         title: item.title,
-        priority: item.priority,
+        // 优先级为动态字段（由【页面配置-手动用例字段】驱动），值存 customFields.priority
+        priority: item.customFields?.priority,
         status: item.caseStatus,
       }))
       pagination.total = res.data?.total || 0

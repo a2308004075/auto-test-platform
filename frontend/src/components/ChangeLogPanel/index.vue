@@ -27,6 +27,7 @@ const effectiveFieldLabelMap = computed(() => ({
   status: '状态',
   assignee: '负责人',
   deadline: '截止日期',
+  content: '内容',
   preconditions: '前置条件',
   operationSteps: '操作步骤',
   expectedResult: '预期结果',
@@ -42,10 +43,20 @@ function getFieldLabel(fieldName: string) {
   return (effectiveFieldLabelMap.value as Record<string, string>)[fieldName] || fieldName
 }
 
+/** 去除富文本标签保留纯文本（富文本字段变更值展示用） */
+function stripHtml(html: string): string {
+  return (html || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
 function getValueLabel(fieldName: string, value: string | null | undefined) {
   if (value === null || value === undefined || value === '') return '空'
   const map = props.valueLabelMap?.[fieldName]
   if (map && map[value] !== undefined) return map[value]
+  // 富文本字段（如用例/缺陷"内容"）变更值去标签截断展示，避免渲染原始 HTML
+  if (fieldName === 'content') {
+    const text = stripHtml(value)
+    return text.length > 100 ? `${text.substring(0, 100)}...` : text
+  }
   return value
 }
 

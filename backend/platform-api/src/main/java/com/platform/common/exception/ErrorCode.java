@@ -146,6 +146,8 @@ public final class ErrorCode {
     public static final int CUSTOM_FIELD_NOT_FOUND = 2103;
     public static final int CUSTOM_FIELD_KEY_DUPLICATE = 2104;
     public static final int CUSTOM_FIELD_LABEL_DUPLICATE = 2105;
+    public static final int CONTENT_TEMPLATE_NOT_FOUND = 2106;
+    public static final int CONTENT_TEMPLATE_NAME_DUPLICATE = 2107;
 
     // ===== M11 测试代码库 (2200-2299) =====
     public static final int REPOSITORY_NOT_FOUND = 2200;
@@ -241,6 +243,7 @@ public final class ErrorCode {
             case MENU_NOT_FOUND:
             case CACHE_KEY_NOT_FOUND:
             case CUSTOM_FIELD_NOT_FOUND:
+            case CONTENT_TEMPLATE_NOT_FOUND:
             case REPOSITORY_NOT_FOUND:
             case REPOSITORY_GROUP_NOT_FOUND:
             case REQUIREMENT_GROUP_NOT_FOUND:
@@ -275,6 +278,7 @@ public final class ErrorCode {
             case API_MODULE_NAME_DUPLICATE:
             case CUSTOM_FIELD_KEY_DUPLICATE:
             case CUSTOM_FIELD_LABEL_DUPLICATE:
+            case CONTENT_TEMPLATE_NAME_DUPLICATE:
                 return 409;
             case EXECUTION_QUEUE_FULL:
                 return 429;

@@ -7,12 +7,13 @@
 /**
  * 手动化用例列表
  * 左侧分组树 + 右侧高级搜索 + 批量操作 + 分页表格
+ * 列表列与筛选项由【页面配置-手动用例字段】驱动（状态走专门列，值走 case_status 列）
  */
-import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, reactive, nextTick, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  getManualCases, deleteManualCase, toggleManualCaseStatus,
+  getManualCases, deleteManualCase, toggleManualCaseStatus, updateManualCase,
   getManualCaseGroups, createManualCaseGroup, updateManualCaseGroup,
   deleteManualCaseGroup, clearManualGroupCases, clearManualProjectCases
 } from '@/api/manualCase'
@@ -20,14 +21,17 @@ import PageHeader from '@/components/PageHeader/index.vue'
 import ProSearchCard from '@/components/ProSearchCard/index.vue'
 import BatchBar from '@/components/BatchBar/index.vue'
 import ProPagination from '@/components/ProPagination/index.vue'
-import { useDict } from '@/composables/useDict'
+import { useManualCaseStatusOptions } from '@/composables/useManualCaseStatus'
+import { getCustomFieldsForRender } from '@/api/customField'
+import { isScopeVisible } from '@/utils/customFieldScope'
 import { usePermission } from '@/composables/usePermission'
 
 const route = useRoute()
 const router = useRouter()
 const projectId = computed(() => Number(route.params.id))
 const { hasPermission } = usePermission()
-const { options: priorityOptions } = useDict('priority')
+// 状态选项优先读【页面配置-手动用例字段】的"状态"字段配置（按项目），无配置回退内置选项
+const { options: statusOptions } = useManualCaseStatusOptions(() => projectId.value)
 
 // ===== 列表数据 =====
 const loading = ref(false)
@@ -36,7 +40,9 @@ const pagination = reactive({ current: 1, pageSize: 20, total: 0 })
 const selectedRows = ref<any[]>([])
 
 // ===== 搜索条件 =====
-const search = reactive({ title: '', priority: '', caseType: '', caseStatus: '' })
+const search = reactive({ title: '', caseStatus: '' })
+// 动态字段筛选（fieldKey -> 值：单值字符串或日期范围 [start, end]）
+const searchCustom = reactive<Record<string, any>>({})
 
 // ===== 分组 =====
 const groups = ref<any[]>([])
@@ -80,6 +86,18 @@ function filterNode(value: string, data: any) {
   return data.name.toLowerCase().includes(value.toLowerCase())
 }
 
+/** 搜索区分组筛选树（未分组 + 用户分组；与左侧分组树共用 activeGroupId，选中即联动高亮） */
+const groupFilterTree = computed(() => {
+  const build = (parentId: number | null): any[] =>
+    groups.value
+      .filter((g) => g.isSystem !== 1 && (g.parentId ?? null) === parentId)
+      .map((g) => {
+        const children = build(g.id)
+        return { id: g.id, name: g.name, ...(children.length > 0 ? { children } : {}) }
+      })
+  return [{ id: -1, name: '未分组' }, ...build(null)]
+})
+
 function onGroupNodeClick(data: any) {
   selectGroup(data.id)
 }
@@ -95,17 +113,35 @@ async function fetchList() {
   loading.value = true
   try {
     const groupIdParam = activeGroupId.value === 0 ? undefined : activeGroupId.value === -1 ? 0 : activeGroupId.value
+    // 动态字段筛选：组装 fieldKey -> 值（日期范围为 [start, end]，其余为字符串）
+    const customFilters: Record<string, any> = {}
+    for (const f of displayFields.value) {
+      const v = searchCustom[f.fieldKey]
+      if (v === undefined || v === null || v === '') continue
+      if (Array.isArray(v)) {
+        if (!v[0] && !v[1]) continue
+        customFilters[f.fieldKey] = v.map((x: any) => (x ? String(x) : ''))
+      } else {
+        customFilters[f.fieldKey] = String(v)
+      }
+    }
     const res: any = await getManualCases(projectId.value, {
       groupId: groupIdParam,
       keyword: search.title || undefined,
-      priority: search.priority || undefined,
-      caseType: search.caseType || undefined,
       caseStatus: search.caseStatus || undefined,
+      customFilters: Object.keys(customFilters).length > 0 ? JSON.stringify(customFilters) : undefined,
       page: pagination.current, pageSize: pagination.pageSize,
     })
     list.value = res.data?.items || []
     pagination.total = res.data?.total || 0
   } catch { list.value = [] } finally { loading.value = false }
+}
+
+/** 搜索区分组筛选：与左侧分组树联动（同一 activeGroupId），清空回到全部 */
+function handleFilterGroupChange(val: number | undefined) {
+  activeGroupId.value = (val ?? 0) as number
+  pagination.current = 1
+  fetchList()
 }
 
 function selectGroup(id: number) {
@@ -116,7 +152,9 @@ function selectGroup(id: number) {
 
 function handleSearch() { pagination.current = 1; fetchList() }
 function handleReset() {
-  Object.assign(search, { title: '', priority: '', caseType: '', caseStatus: '' })
+  Object.assign(search, { title: '', caseStatus: '' })
+  for (const key of Object.keys(searchCustom)) delete searchCustom[key]
+  activeGroupId.value = 0
   handleSearch()
 }
 
@@ -242,7 +280,6 @@ const batchMoveTarget = ref<number | null>(null)
 async function handleBatchMove() {
   if (!batchMoveTarget.value) { ElMessage.warning('请选择目标分组'); return }
   try {
-    const { updateManualCase } = await import('@/api/manualCase')
     for (const id of selectedIds.value) {
       await updateManualCase(projectId.value, id, { groupId: batchMoveTarget.value })
     }
@@ -259,8 +296,46 @@ function openCreate() {
   router.push(`/project/${projectId.value}/manual-cases/new`)
 }
 
-function handleEdit(record: any) {
-  router.push(`/project/${projectId.value}/manual-cases/${record.id}/edit`)
+function handleView(record: any) {
+  router.push(`/project/${projectId.value}/manual-cases/${record.id}`)
+}
+
+// ===== 标题行内编辑（点击即改，失焦/回车自动保存） =====
+const titleEditingId = ref<number | null>(null)
+const titleEditingValue = ref('')
+const titleInputRef = ref()
+
+/** 点击用例标题：进入行内编辑 */
+function startTitleEdit(row: any) {
+  titleEditingId.value = row.id
+  titleEditingValue.value = row.title || ''
+  nextTick(() => {
+    const input = titleInputRef.value as any
+    if (input) {
+      input.focus()
+      if (typeof input.select === 'function') input.select()
+    }
+  })
+}
+
+/** 标题失焦/回车：退出编辑并自动保存（空标题回退原值） */
+async function handleTitleBlur(row: any) {
+  if (titleEditingId.value !== row.id) return
+  titleEditingId.value = null
+  const title = titleEditingValue.value.trim()
+  if (!title) {
+    ElMessage.warning('用例标题不能为空')
+    return
+  }
+  if (title === (row.title || '')) return
+  try {
+    await updateManualCase(projectId.value, row.id, { title })
+    ElMessage.success('已保存')
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '保存失败')
+  } finally {
+    fetchList()
+  }
 }
 
 async function handleToggleStatus(record: any) {
@@ -314,16 +389,46 @@ function handleDeleteGroup(g: any) {
     .catch(() => {})
 }
 
-// ===== 常量映射 =====
-const priorityTypeMap: Record<string, string> = { '高': 'danger', '中': 'warning', '低': 'info' }
-const caseTypeLabel: Record<string, string> = { NORMAL: '正常', EXCEPTION: '异常' }
-const caseTypeTagType: Record<string, string> = { NORMAL: 'success', EXCEPTION: 'warning' }
+// ===== 动态字段列（与详情页"字段信息"同源：【页面配置-手动用例字段】统一存 edit 视图） =====
+const displayFields = ref<any[]>([])
+
+/** 加载列表动态列：状态走专门列、多行文本内容长不进列表；不含"详情"位置的字段不进列表（列表属查看场景，与详情一致） */
+async function fetchDisplayFields() {
+  try {
+    const res: any = await getCustomFieldsForRender({
+      projectId: projectId.value,
+      module: 'manual_case',
+      viewType: 'edit',
+    })
+    displayFields.value = (res.data || []).filter(
+      (f: any) => f.fieldKey !== 'case_status' && f.fieldType !== 'textarea' && isScopeVisible(f.displayScope, 'detail'),
+    )
+  } catch { displayFields.value = [] }
+}
+
+/** 解析动态字段选项：优先 field.options，回退 optionsJson（与 DynamicFieldGrid 逻辑一致） */
+function parseFieldOptions(field: any): any[] {
+  if (field?.options && field.options.length > 0) return field.options
+  if (!field?.optionsJson) return []
+  try { return JSON.parse(field.optionsJson) } catch { return [] }
+}
+
+/** 动态字段列显示文本：下拉/用户/环境类按 value 翻译 label，其余原样显示 */
+function fieldDisplayText(field: any, row: any): string {
+  const value = row.customFields?.[field.fieldKey]
+  if (value === undefined || value === null || value === '') return ''
+  if (['select', 'user', 'environment'].includes(field.fieldType)) {
+    const hit = parseFieldOptions(field).find((o: any) => String(o.value) === String(value))
+    return hit ? hit.label : value
+  }
+  return value
+}
 
 // ===== 生命周期 =====
 const treeRef = ref()
 function onDocClick() { closeContextMenu() }
 onMounted(() => {
-  fetchGroups(); fetchList()
+  fetchGroups(); fetchList(); fetchDisplayFields()
   document.addEventListener('click', onDocClick)
 })
 onBeforeUnmount(() => {
@@ -379,27 +484,65 @@ onBeforeUnmount(() => {
             <el-input v-model="search.title" placeholder="搜索用例标题" clearable style="width: 180px" @keyup.enter="handleSearch" />
           </div>
           <div class="pro-search-field">
-            <span class="pro-search-label">优先级</span>
-            <el-select v-model="search.priority" placeholder="全部" clearable style="width: 100px">
-              <el-option v-for="p in priorityOptions" :key="p.value" :value="p.value" :label="p.label" />
+            <span class="pro-search-label">状态</span>
+            <el-select v-model="search.caseStatus" placeholder="全部" clearable style="width: 120px">
+              <el-option v-for="s in statusOptions" :key="s.value" :value="s.value" :label="s.label" />
             </el-select>
           </div>
           <div class="pro-search-field">
-            <span class="pro-search-label">用例类型</span>
-            <el-select v-model="search.caseType" placeholder="全部" clearable style="width: 100px">
-              <el-option value="NORMAL" label="正常" />
-              <el-option value="EXCEPTION" label="异常" />
-            </el-select>
+            <span class="pro-search-label">所属分组</span>
+            <el-tree-select
+              :model-value="activeGroupId === 0 ? undefined : activeGroupId"
+              :data="groupFilterTree"
+              node-key="id"
+              :props="{ label: 'name', value: 'id', children: 'children' }"
+              check-strictly
+              clearable
+              filterable
+              placeholder="全部"
+              style="width: 160px"
+              @update:model-value="handleFilterGroupChange"
+            />
           </div>
-          <template #collapse>
-            <div class="pro-search-field">
-              <span class="pro-search-label">用例状态</span>
-              <el-select v-model="search.caseStatus" placeholder="全部状态" clearable style="width: 120px">
-                <el-option value="1" label="使用" />
-                <el-option value="0" label="废弃" />
-              </el-select>
-            </div>
-          </template>
+          <!-- 动态字段筛选（【页面配置-手动用例字段】，与列表动态列同源） -->
+          <div v-for="field in displayFields" :key="field.fieldKey" class="pro-search-field">
+            <span class="pro-search-label">{{ field.fieldLabel }}</span>
+            <el-select
+              v-if="['select', 'user', 'environment'].includes(field.fieldType)"
+              v-model="searchCustom[field.fieldKey]"
+              placeholder="全部"
+              clearable
+              filterable
+              style="width: 140px"
+            >
+              <el-option v-for="o in parseFieldOptions(field)" :key="o.value" :value="o.value" :label="o.label" />
+            </el-select>
+            <el-date-picker
+              v-else-if="field.fieldType === 'datetime'"
+              v-model="searchCustom[field.fieldKey]"
+              type="daterange"
+              value-format="YYYY-MM-DD"
+              range-separator="至"
+              start-placeholder="开始"
+              end-placeholder="结束"
+              style="width: 240px"
+            />
+            <el-input-number
+              v-else-if="field.fieldType === 'number'"
+              v-model="searchCustom[field.fieldKey]"
+              :controls="false"
+              placeholder="精确匹配"
+              style="width: 140px"
+            />
+            <el-input
+              v-else
+              v-model="searchCustom[field.fieldKey]"
+              placeholder="包含"
+              clearable
+              style="width: 140px"
+              @keyup.enter="handleSearch"
+            />
+          </div>
         </ProSearchCard>
 
         <BatchBar
@@ -418,27 +561,32 @@ onBeforeUnmount(() => {
           <el-table-column type="selection" width="45" />
           <el-table-column prop="title" label="用例标题" min-width="200" show-overflow-tooltip>
             <template #default="{ row }">
-              <el-button type="primary" link @click="handleEdit(row)">{{ row.title }}</el-button>
+              <el-input
+                v-if="titleEditingId === row.id"
+                ref="titleInputRef"
+                v-model="titleEditingValue"
+                placeholder="请输入用例标题"
+                maxlength="200"
+                @blur="handleTitleBlur(row)"
+                @keyup.enter="handleTitleBlur(row)"
+              />
+              <span
+                v-else
+                class="manual-case-title-editable"
+                @click="startTitleEdit(row)"
+              >{{ row.title }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="用例类型" width="90">
+          <!-- 动态字段列（【页面配置-手动用例字段】，与详情页"字段信息"同源；仅新建显示的字段不进列表） -->
+          <el-table-column
+            v-for="field in displayFields"
+            :key="field.fieldKey"
+            :label="field.fieldLabel"
+            :min-width="field.fieldType === 'datetime' ? 150 : 120"
+            show-overflow-tooltip
+          >
             <template #default="{ row }">
-              <el-tag :type="(caseTypeTagType[row.caseType] || 'info') as any" size="small">{{ caseTypeLabel[row.caseType] || row.caseType }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="优先级" width="80">
-            <template #default="{ row }">
-              <el-tag :type="(priorityTypeMap[row.priority] || 'info') as any" size="small">{{ row.priority }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="测试环境" width="90">
-            <template #default="{ row }">
-              <el-tag :type="row.runInTestEnv === 1 ? 'success' : 'info'" size="small">{{ row.runInTestEnv === 1 ? '是' : '否' }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="生产环境" width="90">
-            <template #default="{ row }">
-              <el-tag :type="row.runInProdEnv === 1 ? 'success' : 'info'" size="small">{{ row.runInProdEnv === 1 ? '是' : '否' }}</el-tag>
+              {{ fieldDisplayText(field, row) }}
             </template>
           </el-table-column>
           <el-table-column label="状态" width="80">
@@ -446,9 +594,15 @@ onBeforeUnmount(() => {
               <el-tag :type="row.caseStatus === 1 ? 'success' : 'danger'" size="small">{{ row.caseStatus === 1 ? '使用' : '废弃' }}</el-tag>
             </template>
           </el-table-column>
+          <el-table-column prop="createdByName" label="创建人" width="110" show-overflow-tooltip />
+          <el-table-column label="创建时间" width="150">
+            <template #default="{ row }">
+              {{ row.createdAt?.substring(0, 16)?.replace('T', ' ') }}
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="180" fixed="right">
             <template #default="{ row }">
-              <el-button v-if="hasPermission('project:manual-case:edit')" type="primary" link size="small" @click="handleEdit(row)">编辑</el-button>
+              <el-button type="primary" link size="small" @click="handleView(row)">详情</el-button>
               <el-button v-if="hasPermission('project:manual-case:toggle')" type="primary" link size="small" @click="handleToggleStatus(row)">{{ row.caseStatus === 1 ? '废弃' : '启用' }}</el-button>
               <el-button v-if="hasPermission('project:manual-case:delete')" type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
             </template>
@@ -541,6 +695,8 @@ onBeforeUnmount(() => {
 .group-count { font-size: 12px; color: #909399; flex-shrink: 0; }
 .group-lock { font-size: 10px; color: #c0c4cc; flex-shrink: 0; margin-left: 2px; }
 .case-content { flex: 1; min-width: 0; }
+/* 用例标题：点击行内编辑（悬浮变色提示可编辑，鼠标保持默认箭头不变手型） */
+.manual-case-title-editable:hover { color: #409eff; }
 
 .context-menu { position: fixed; background: #fff; border: 1px solid #ebeef5; border-radius: 4px; box-shadow: 0 2px 12px rgba(0,0,0,0.1); padding: 4px 0; min-width: 130px; z-index: 9999; }
 .context-menu-item { padding: 7px 14px; font-size: 13px; color: #303133; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: background 0.15s; }

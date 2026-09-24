@@ -8,8 +8,8 @@ import request from './request'
 // ===== 手动化用例 API =====
 
 export function getManualCases(projectId: number, params?: {
-  groupId?: number; keyword?: string; priority?: string;
-  caseType?: string; caseStatus?: string; page?: number; pageSize?: number
+  groupId?: number; keyword?: string; caseStatus?: string; customFilters?: string;
+  page?: number; pageSize?: number
 }) {
   return request.get(`/v1/projects/${projectId}/manual-cases`, { params })
 }
@@ -30,8 +30,20 @@ export function deleteManualCase(projectId: number, caseId: number) {
   return request.post(`/v1/projects/${projectId}/manual-cases/${caseId}/delete`)
 }
 
-export function toggleManualCaseStatus(projectId: number, caseId: number) {
-  return request.post(`/v1/projects/${projectId}/manual-cases/${caseId}/status`)
+export function toggleManualCaseStatus(projectId: number, caseId: number, targetStatus?: number) {
+  return request.post(`/v1/projects/${projectId}/manual-cases/${caseId}/status`, null, {
+    params: targetStatus != null ? { targetStatus } : undefined,
+  })
+}
+
+// ===== 附件 API =====
+
+export function addManualCaseAttachment(projectId: number, caseId: number, params: { fileName: string; fileUrl: string; fileSize?: number }) {
+  return request.post(`/v1/projects/${projectId}/manual-cases/${caseId}/attachments`, null, { params })
+}
+
+export function deleteManualCaseAttachment(projectId: number, caseId: number, attachmentId: number) {
+  return request.post(`/v1/projects/${projectId}/manual-cases/${caseId}/attachments/${attachmentId}/delete`)
 }
 
 // ===== 手动化用例分组 API =====

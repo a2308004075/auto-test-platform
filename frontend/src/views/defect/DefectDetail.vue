@@ -10,8 +10,9 @@
  * 内容直接编辑（无编辑模式按钮），附件与关联本页暂存、随创建一次性提交，保存后返回列表
  * 详情模式（/defects/:defectId）：内置查看/编辑模式
  * 内容（富文本）：进入编辑模式后修改（取消/保存在内容模块标题行）
+ * 内容模板（【页面配置-内容模板】按项目+业务类型维护）：仅新建页自动填入「内容」，详情页无套用入口
  * 缺陷标题：新建时页头直接输入；详情时点击标题行内编辑，失焦自动保存
- * 字段信息：统一使用【字段管理-缺陷字段】配置，按"显示位置"区分新建/详情可见性
+ * 字段信息：统一使用【页面配置-缺陷字段】配置，按"显示位置"区分新建/详情可见性
  * 附件 / 关联：新建本页暂存；详情直接操作（增删即时保存）
  */
 import { ref, reactive, onMounted, computed, watch, shallowRef, nextTick } from 'vue'
@@ -27,6 +28,7 @@ import CaseSelectDialog from '@/components/CaseSelectDialog/index.vue'
 import DynamicFieldGrid from '@/components/DynamicFieldGrid/index.vue'
 import CommentPanel from '@/components/CommentPanel/index.vue'
 import { getCustomFieldsForRender } from '@/api/customField'
+import { getContentTemplates } from '@/api/contentTemplate'
 import { useDict } from '@/composables/useDict'
 import { useDefectStatusOptions } from '@/composables/useDefectStatus'
 import { isScopeVisible } from '@/utils/customFieldScope'
@@ -41,7 +43,7 @@ const defectId = computed(() => Number(route.params.defectId))
 const isCreate = computed(() => !route.params.defectId)
 const { options: relationTypeOptions } = useDict('defect_relation_type')
 const { options: targetTypeOptions } = useDict('defect_target_type')
-// 状态选项优先读【字段管理-缺陷字段】的"状态"字段配置（按项目），无配置回退字典
+// 状态选项优先读【页面配置-缺陷字段】的"状态"字段配置（按项目），无配置回退字典
 const { options: statusOptions } = useDefectStatusOptions(() => projectId.value)
 
 const relationTypeLabelMap = computed(() => {
@@ -76,7 +78,7 @@ const form = reactive({
 })
 // 动态字段值（fieldKey -> 值）：新建初始化默认值；详情加载与每次保存后同步自后端
 const fieldValues = ref<Record<string, any>>({})
-// 动态字段配置全量（【字段管理-缺陷字段】统一存 edit 视图；含全部显示位置，变更记录翻译用）
+// 动态字段配置全量（【页面配置-缺陷字段】统一存 edit 视图；含全部显示位置，变更记录翻译用）
 const editFields = ref<any[]>([])
 
 /** 当前模式可见字段：按"显示位置"过滤（新建=含"新建"位置；详情=含"详情"位置） */
@@ -156,7 +158,25 @@ watch(editing, (val) => {
   else editor.disable()
 })
 
-/** 「状态」必填标记：取【字段管理-缺陷字段】配置的 isRequired（系统预置为 1），页头状态区据此显示红星 */
+// ===== 内容模板（【页面配置-内容模板】按项目 + 业务类型维护；仅新建页自动填入，详情页无套用入口） =====
+/**
+ * 新建模式：加载「缺陷」内容模板并自动填入内容区（模板内容非空时）；
+ * 模板仅作用于新建页，进入页面即填充，无需手动套用
+ */
+async function applyContentTemplateOnCreate() {
+  if (!isCreate.value) return
+  try {
+    const res: any = await getContentTemplates({ projectId: projectId.value, bizType: 'defect' })
+    const tpl = (res.data || [])[0]
+    if (tpl && stripHtml(tpl.content || '')) {
+      form.content = tpl.content
+    }
+  } catch {
+    // 模板加载失败不阻塞新建页（内容留空由用户自行填写）
+  }
+}
+
+/** 「状态」必填标记：取【页面配置-缺陷字段】配置的 isRequired（系统预置为 1），页头状态区据此显示红星 */
 const statusRequired = ref(false)
 
 const statusLabelMap = computed(() => {
@@ -287,7 +307,7 @@ async function fetchGroups() {
   } catch { groups.value = [] }
 }
 
-/** 动态字段配置（【字段管理-缺陷字段】统一存 edit 视图；新建模式初始化可见字段默认值） */
+/** 动态字段配置（【页面配置-缺陷字段】统一存 edit 视图；新建模式初始化可见字段默认值） */
 async function fetchEditFields() {
   try {
     const res: any = await getCustomFieldsForRender({
@@ -296,7 +316,7 @@ async function fetchEditFields() {
       viewType: 'edit',
     })
     const fields: any[] = res.data || []
-    // 「状态」必填标记：取字段管理配置（系统预置必填），页头状态区据此显示红星
+    // 「状态」必填标记：取页面配置（系统预置必填），页头状态区据此显示红星
     statusRequired.value = fields.find((f: any) => f.fieldKey === 'defect_status')?.isRequired === 1
     // 状态字段（defect_status）仅作为流转下拉框的选项来源，不进字段信息区渲染（其值走 defect.status，不走自定义字段值）
     editFields.value = fields.filter((f: any) => f.fieldKey !== 'defect_status')
@@ -550,6 +570,7 @@ function openFile(url: string) {
 onMounted(() => {
   fetchGroups()
   fetchEditFields()
+  applyContentTemplateOnCreate()
   // 新建模式无详情可拉取（附件/关联为本页暂存）
   if (!isCreate.value) fetchDetail()
 })
@@ -606,7 +627,7 @@ onMounted(() => {
               <span class="meta-item">创建时间：{{ formatDateTime(detail.createdAt) }}</span>
               <span class="meta-item">重新打开次数：{{ detail.reopenCount ?? 0 }}</span>
               <div v-if="!editing" class="meta-status-group">
-                <!-- 必填标记：「状态」在【字段管理】中配置为必填时显示红星 -->
+                <!-- 必填标记：「状态」在【页面配置】中配置为必填时显示红星 -->
                 <span v-if="statusRequired" class="meta-asterisk">*</span>
                 <span class="meta-item">状态：</span>
                 <el-select
@@ -984,7 +1005,7 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
 }
-/* 必填星号（「状态」在【字段管理】中配置为必填时显示，样式对齐 Element Plus 必填标记） */
+/* 必填星号（「状态」在【页面配置】中配置为必填时显示，样式对齐 Element Plus 必填标记） */
 .meta-asterisk {
   color: var(--el-color-danger);
   margin-right: -4px;

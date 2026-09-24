@@ -183,8 +183,11 @@ public class ProjectService {
 
         createSystemRequirementGroup(project.getId(), "未分组", null, "未分组的需求版本");
 
-        // 预置缺陷"状态"字段（【字段管理-编辑缺陷】视图，流转状态下拉框的选项来源）
+        // 预置缺陷"状态"字段（【页面配置-缺陷字段】视图，流转状态下拉框的选项来源）
         customFieldService.createDefaultStatusField(project.getId());
+
+        // 预置手动用例"状态"字段（【页面配置-手动用例字段】视图，详情页状态下拉框的选项来源）
+        customFieldService.createDefaultManualCaseStatusField(project.getId());
 
         return toResponse(project);
     }

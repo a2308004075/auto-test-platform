@@ -41,6 +41,11 @@ public class RequirementItem extends BaseEntity {
     private String description;
 
     /**
+     * 需求内容（富文本 HTML，与缺陷/手动用例"内容"一致；新建页可由【页面配置-内容模板】自动填入）
+     */
+    private String content;
+
+    /**
      * 需求类型：FEATURE-功能，IMPROVEMENT-优化，BUG-Bug
      */
     private String reqType;

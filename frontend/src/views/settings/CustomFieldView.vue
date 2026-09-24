@@ -1,14 +1,16 @@
 <!--
  @author HXN
  @date 2026-08-30
- @description 字段管理视图
+ @description 页面配置视图
 -->
 <script setup lang="ts">
 /**
- * 字段管理页面（仅 ADMIN）
- * 左侧层级树：项目（当前项目）→ 模块（固定 缺陷/需求），模块下不再分视图，
- * 字段统一存于 edit 视图，用"显示位置"区分新建/详情差异化显示；
- * 右侧字段列表，新增/编辑通过弹窗填写
+ * 页面配置页面（仅 ADMIN；左侧"项目 → 功能页 → 配置页"树常驻，功能页固定 缺陷/手动用例/需求，
+ * 每个功能页下含【字段设置】【内容模板】两个配置叶子，右侧显示当前选中叶子的内容）
+ * 【字段设置】维护该功能页的字段列表，字段统一存于 edit 视图，
+ * 用"显示位置"区分新建/详情差异化显示；新增/编辑通过弹窗填写
+ * 【内容模板】按项目维护该功能页"内容"富文本模板（ContentTemplatePanel，按 bizType 区分），
+ * 仅用于新建页：打开对应业务新建页时自动填入「内容」编辑框
  */
 import { ref, reactive, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -19,6 +21,7 @@ import { useProjectStore } from '@/stores'
 import { usePermission } from '@/composables/usePermission'
 import PageHeader from '@/components/PageHeader/index.vue'
 import TableFit from '@/components/TableFit/index.vue'
+import ContentTemplatePanel from '@/components/ContentTemplatePanel/index.vue'
 import { toScopeList } from '@/utils/customFieldScope'
 
 const { hasPermission } = usePermission()
@@ -29,37 +32,61 @@ const hasCurrentProject = computed(() => !!projectStore.currentProjectId)
 const currentProjectId = computed(() => projectStore.currentProjectId)
 const currentProjectName = computed(() => projectStore.currentProjectName)
 
-// ===== 层级树：项目 → 模块（模块固定；字段统一存 edit 视图，由"显示位置"驱动新建/详情差异） =====
+// ===== 左侧层级树：项目 → 功能页 → 配置页（缺陷/手动用例/需求各含【字段设置】【内容模板】两个叶子；
+//      字段统一存 edit 视图，由"显示位置"驱动新建/详情差异） =====
+interface PageNode {
+  label: string
+  /** 配置页：field-字段设置，template-内容模板 */
+  page: 'field' | 'template'
+}
+
 interface ModuleNode {
   label: string
   module: string
+  children: PageNode[]
 }
 
-const moduleTree: ModuleNode[] = [
-  { label: '缺陷字段', module: 'defect' },
-  { label: '需求字段', module: 'requirement' },
+const MODULE_CHILDREN: PageNode[] = [
+  { label: '字段设置', page: 'field' },
+  { label: '内容模板', page: 'template' },
 ]
 
-// 树展开状态
+const moduleTree: ModuleNode[] = [
+  { label: '缺陷', module: 'defect', children: MODULE_CHILDREN },
+  { label: '手动用例', module: 'manual_case', children: MODULE_CHILDREN },
+  { label: '需求', module: 'requirement', children: MODULE_CHILDREN },
+]
+
+// 树展开状态（根=项目，模块=功能页，默认全部展开）
 const rootExpanded = ref(true)
+const moduleExpanded = reactive<Record<string, boolean>>({
+  defect: true,
+  manual_case: true,
+  requirement: true,
+})
 
 function toggleRoot() {
   rootExpanded.value = !rootExpanded.value
 }
 
-// ===== 选中模块（模块节点即可选） =====
+function toggleModule(module: string) {
+  moduleExpanded[module] = !moduleExpanded[module]
+}
+
+// ===== 选中配置页（功能页模块 + 字段设置/内容模板叶子） =====
 const selectedModule = ref('')
+const selectedPage = ref<'' | 'field' | 'template'>('')
 
 const selectedModuleLabel = computed(
   () => moduleTree.find((m) => m.module === selectedModule.value)?.label || ''
 )
 
-// 当前项目 + 模块选齐后右侧才可编辑（字段统一存 edit 视图）
-const viewReady = computed(() => hasCurrentProject.value && !!selectedModule.value)
+// 当前项目 + 配置页选齐后右侧才可编辑
+const viewReady = computed(() => hasCurrentProject.value && !!selectedModule.value && !!selectedPage.value)
 
 const placeholderText = computed(() => {
-  if (!hasCurrentProject.value) return '请先从首页进入项目，再使用字段管理'
-  return '请在左侧选择具体模块（如"缺陷字段"）'
+  if (!hasCurrentProject.value) return '请先从首页进入项目，再使用页面配置'
+  return '请在左侧选择要配置的功能页（如"缺陷-字段设置"）'
 })
 
 const fieldTypeOptions = [
@@ -82,8 +109,9 @@ const fieldTypeLabelMap: Record<string, string> = {
   environment: '环境选择',
 }
 
-// 显示位置：多选（create=新建显示 / detail=详情(编辑)显示），选项文案按当前模块动态生成（缺陷/需求）
-const moduleShortName = computed(() => (selectedModule.value === 'defect' ? '缺陷' : '需求'))
+// 显示位置：多选（create=新建显示 / detail=详情(编辑)显示），选项文案按当前模块动态生成（缺陷/手动用例/需求）
+const MODULE_SHORT_NAMES: Record<string, string> = { defect: '缺陷', manual_case: '手动用例', requirement: '需求' }
+const moduleShortName = computed(() => MODULE_SHORT_NAMES[selectedModule.value] || '需求')
 const displayScopeOptions = computed(() => [
   { label: `新建${moduleShortName.value}`, value: 'create' },
   { label: `${moduleShortName.value}详情`, value: 'detail' },
@@ -129,7 +157,7 @@ const form = reactive({
 })
 
 // 下拉框选项动态编辑（仅填显示文本；存储值"值随行保留"：拖拽调序/增删选项均不改变存量数据语义，
-// 与缺陷流转状态（defect_status）编码处理一致；缺值行保存时自动分配新值）
+// 与状态字段（defect_status/case_status）编码处理一致；缺值行保存时自动分配新值）
 /** 枚举选项行：uid=行唯一标识（v-for key 与拖拽重排身份），value=存储值 */
 interface OptionRow {
   uid: number
@@ -145,8 +173,10 @@ function nextOptionRowUid(): number {
 }
 
 const isSelectType = computed(() => form.fieldType === 'select')
-// 状态字段（fieldKey=defect_status）：流转状态下拉框的选项来源，编码不可重排、类型不可改、不可删除
-const isStatusField = computed(() => isEdit.value && editingFieldKey.value === 'defect_status')
+// 各模块系统状态字段 key：值走业务表列，配置仅作状态下拉框选项来源（编码不可重排、类型不可改、不可删除）
+const STATUS_FIELD_KEYS: Record<string, string> = { defect: 'defect_status', manual_case: 'case_status' }
+const statusFieldKey = computed(() => STATUS_FIELD_KEYS[selectedModule.value] || '')
+const isStatusField = computed(() => isEdit.value && !!statusFieldKey.value && editingFieldKey.value === statusFieldKey.value)
 
 // 类型切换时清理互斥配置（枚举选项仅 select 用）
 function handleFieldTypeChange() {
@@ -180,12 +210,14 @@ async function fetchList() {
   ensureSortable()
 }
 
-// ===== 左侧选择模块节点 =====
-function selectView(module: string) {
-  if (selectedModule.value === module) return
+// ===== 左侧选择配置页叶子（功能页 + 字段设置/内容模板） =====
+function selectView(module: string, page: 'field' | 'template') {
+  if (selectedModule.value === module && selectedPage.value === page) return
   selectedModule.value = module
+  selectedPage.value = page
   resetForm()
-  fetchList()
+  // 仅字段设置页拉取字段列表（内容模板面板自带加载）
+  if (page === 'field') fetchList()
 }
 
 // 当前项目变化（重新进入其他项目后返回本页）：清空选择与表单
@@ -193,6 +225,7 @@ watch(
   () => projectStore.currentProjectId,
   () => {
     selectedModule.value = ''
+    selectedPage.value = ''
     dialogVisible.value = false
     resetForm()
     fieldList.value = []
@@ -360,7 +393,7 @@ async function handleSubmit() {
 }
 
 // ===== 拖拽排序（拖动行首手柄调整顺序，落点即保存；保存期间禁用拖拽防连点） =====
-const canSort = computed(() => hasPermission('system:custom-field:edit'))
+const canSort = computed(() => hasPermission('system:page-config:edit'))
 const tableRef = ref()
 let sortable: Sortable | null = null
 
@@ -374,7 +407,7 @@ function ensureSortable() {
     ghostClass: 'cf-drag-ghost',
     // 「状态」字段位置不可修改：禁止任何行插入到它之前（状态行本身无拖拽手柄、不可拖动）
     onMove: (evt) => {
-      const statusIdx = fieldList.value.findIndex((f: any) => f.fieldKey === 'defect_status')
+      const statusIdx = fieldList.value.findIndex((f: any) => f.fieldKey === statusFieldKey.value)
       if (statusIdx < 0) return true
       const siblings = Array.from(evt.to.children)
       const relatedIdx = evt.related ? siblings.indexOf(evt.related) : -1
@@ -401,7 +434,7 @@ async function handleDragEnd(oldIndex?: number, newIndex?: number) {
   const [moved] = list.splice(oldIndex, 1)
   list.splice(newIndex, 0, moved)
   // 「状态」字段位置不可修改：兜底校验（拖拽约束已阻止，异常情况下恢复原顺序）
-  if (list.findIndex((f: any) => f.fieldKey === 'defect_status') > 0) {
+  if (list.findIndex((f: any) => f.fieldKey === statusFieldKey.value) > 0) {
     ElMessage.warning('「状态」字段固定排第一位，不能调整其位置')
     await fetchList()
     return
@@ -420,9 +453,10 @@ async function handleDragEnd(oldIndex?: number, newIndex?: number) {
   }
 }
 
-// 视图未选齐时表格卸载，同步销毁拖拽实例（避免持有已卸载的 tbody）
-watch(viewReady, (ready) => {
-  if (!ready) destroySortable()
+// 视图未选齐或切到内容模板页时字段表格卸载，同步销毁拖拽实例
+//（避免持有已卸载的 tbody；回到字段页时由 fetchList 重建）
+watch([viewReady, selectedPage], ([ready, page]) => {
+  if (!ready || page !== 'field') destroySortable()
 })
 
 onBeforeUnmount(destroySortable)
@@ -491,10 +525,11 @@ async function handleDelete(row: any) {
 
 <template>
   <div>
-    <PageHeader title="字段管理" />
+    <PageHeader title="页面配置" />
 
+    <!-- 左侧"项目 → 功能页 → 配置页"树常驻；右侧显示当前选中叶子的内容（字段设置 / 内容模板） -->
     <div class="cf-layout">
-      <!-- 左侧：项目 → 模块 → 视图 层级树 -->
+      <!-- 左侧：项目 → 功能页 → 配置页 层级树 -->
       <div class="cf-panel">
         <!-- 根节点：当前项目 -->
         <div
@@ -509,22 +544,33 @@ async function handleDelete(row: any) {
           </span>
         </div>
 
-        <!-- 二级模块节点（可选叶子：字段统一存 edit 视图，由"显示位置"驱动新建/详情差异） -->
+        <!-- 功能页节点（可展开）+ 配置页叶子（字段设置 / 内容模板；字段统一存 edit 视图，由"显示位置"驱动新建/详情差异） -->
         <template v-if="hasCurrentProject && rootExpanded">
-          <div
-            v-for="m in moduleTree"
-            :key="m.module"
-            :class="['cf-node', 'cf-node-leaf', { active: selectedModule === m.module }]"
-            @click="selectView(m.module)"
-          >
-            <span class="cf-node-label">{{ m.label }}</span>
-          </div>
+          <template v-for="m in moduleTree" :key="m.module">
+            <div class="cf-node cf-node-module" @click="toggleModule(m.module)">
+              <el-icon :class="['cf-arrow', { expanded: moduleExpanded[m.module] }]">
+                <CaretRight />
+              </el-icon>
+              <span class="cf-node-label">{{ m.label }}</span>
+            </div>
+            <template v-if="moduleExpanded[m.module]">
+              <div
+                v-for="p in m.children"
+                :key="m.module + ':' + p.page"
+                :class="['cf-node', 'cf-node-leaf', { active: selectedModule === m.module && selectedPage === p.page }]"
+                @click="selectView(m.module, p.page)"
+              >
+                <span class="cf-node-label">{{ p.label }}</span>
+              </div>
+            </template>
+          </template>
         </template>
       </div>
 
-      <!-- 右侧：字段列表（新增/编辑弹窗操作） -->
+      <!-- 右侧：当前选中配置页内容（字段设置 / 内容模板） -->
       <div class="cf-content">
-        <template v-if="viewReady">
+        <!-- 字段设置：当前功能页的字段列表（新增/编辑弹窗操作） -->
+        <template v-if="viewReady && selectedPage === 'field'">
           <!-- 字段列表 -->
           <div class="cf-card cf-table-card">
             <div class="cf-table-head">
@@ -533,7 +579,7 @@ async function handleDelete(row: any) {
                 <span class="cf-table-count">共 {{ fieldList.length }} 个字段</span>
               </div>
               <el-button
-                v-if="hasPermission('system:custom-field:add')"
+                v-if="hasPermission('system:page-config:add')"
                 type="primary"
                 @click="openCreate"
               >
@@ -554,7 +600,7 @@ async function handleDelete(row: any) {
                     <template #default="{ row }">
                       <!-- 「状态」字段固定排第一位：不提供拖拽手柄，显示锁定标识 -->
                       <span
-                        v-if="row.fieldKey === 'defect_status'"
+                        v-if="row.fieldKey === statusFieldKey"
                         class="cf-drag-locked"
                         title="系统预置字段，固定排第一位，不能调整位置"
                       >
@@ -600,7 +646,7 @@ async function handleDelete(row: any) {
                   <el-table-column label="操作" width="120" align="right" fixed="right">
                     <template #default="{ row }">
                       <el-button
-                        v-if="hasPermission('system:custom-field:edit')"
+                        v-if="hasPermission('system:page-config:edit')"
                         link
                         type="primary"
                         size="small"
@@ -610,7 +656,7 @@ async function handleDelete(row: any) {
                       </el-button>
                       <!-- 状态字段不可删除（后端同样校验）：新建字段的 fieldKey 为自动生成的 UUID，删除后无法重建 -->
                       <el-button
-                        v-if="hasPermission('system:custom-field:delete') && row.fieldKey !== 'defect_status'"
+                        v-if="hasPermission('system:page-config:delete') && row.fieldKey !== statusFieldKey"
                         link
                         type="danger"
                         size="small"
@@ -625,6 +671,13 @@ async function handleDelete(row: any) {
             </TableFit>
           </div>
         </template>
+
+        <!-- 内容模板：当前功能页的"内容"富文本模板（仅新建页自动填入；模块切换时重建面板重新加载） -->
+        <ContentTemplatePanel
+          v-else-if="viewReady && selectedPage === 'template'"
+          :key="selectedModule"
+          :biz-type="selectedModule"
+        />
 
         <!-- 未选齐引导 -->
         <div v-else class="cf-card cf-placeholder">
@@ -718,6 +771,7 @@ async function handleDelete(row: any) {
 .cf-layout {
   display: flex;
   gap: 16px;
+  /* 布局直接位于页头下方，保证内容区随视口撑满 */
   min-height: calc(100vh - 164px);
 }
 
@@ -771,9 +825,16 @@ async function handleDelete(row: any) {
   background: transparent;
 }
 
-/* 模块叶子节点（可选） */
+/* 功能页模块节点（可展开，不直接选中） */
+.cf-node-module {
+  padding-left: 12px;
+  font-weight: 500;
+  color: #303133;
+}
+
+/* 配置页叶子节点（可选：字段设置 / 内容模板） */
 .cf-node-leaf {
-  padding-left: 24px;
+  padding-left: 32px;
 }
 .cf-node-leaf.active {
   background: #ecf5ff;
@@ -792,14 +853,14 @@ async function handleDelete(row: any) {
   transform: rotate(90deg);
 }
 
-/* 右侧内容 */
+/* 右侧内容（直接承载字段卡片 / 内容模板面板，不再有页签层） */
 .cf-content {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
 }
+
 .cf-card {
   background: #fff;
   border: 1px solid #ebeef5;

@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -69,15 +70,35 @@ public class CustomFieldService {
     public static final String DEFECT_STATUS_FIELD_KEY = "defect_status";
 
     /**
-     * "状态"字段固定显示位置：仅缺陷详情（系统预置，不可修改）
+     * 手动用例状态字段的固定 fieldKey：手动用例详情页状态下拉框的选项来源
      */
-    private static final String DEFECT_STATUS_DISPLAY_SCOPE = "detail";
+    public static final String MANUAL_CASE_STATUS_FIELD_KEY = "case_status";
+
+    /**
+     * 各模块"状态"系统字段的固定 fieldKey 映射（module -> fieldKey）
+     */
+    private static final Map<String, String> STATUS_FIELD_KEYS = new HashMap<>();
+    static {
+        STATUS_FIELD_KEYS.put("defect", DEFECT_STATUS_FIELD_KEY);
+        STATUS_FIELD_KEYS.put("manual_case", MANUAL_CASE_STATUS_FIELD_KEY);
+    }
+
+    /**
+     * "状态"字段固定显示位置：仅对应模块的详情显示（系统预置，不可修改）
+     */
+    private static final String STATUS_DISPLAY_SCOPE = "detail";
 
     /**
      * 新建项目时预置的状态选项（value 与 defect.status 现有英文编码一致，存量数据无需迁移）
      */
     private static final String DEFAULT_DEFECT_STATUS_OPTIONS_JSON =
             "[{\"label\":\"新建\",\"value\":\"NEW\"},{\"label\":\"待确认\",\"value\":\"TO_CONFIRM\"},{\"label\":\"修复中\",\"value\":\"FIXING\"},{\"label\":\"待部署\",\"value\":\"TO_DEPLOY\"},{\"label\":\"待验证\",\"value\":\"PENDING\"},{\"label\":\"已修复\",\"value\":\"COMPLETED\"},{\"label\":\"重新打开\",\"value\":\"REOPENED\"},{\"label\":\"延期修复\",\"value\":\"DEFERRED\"},{\"label\":\"无需修复\",\"value\":\"CLOSED\"}]";
+
+    /**
+     * 新建项目时预置的手动用例状态选项（value 与 manual_case.case_status 列值一致：1-使用，0-废弃）
+     */
+    private static final String DEFAULT_MANUAL_CASE_STATUS_OPTIONS_JSON =
+            "[{\"label\":\"使用\",\"value\":\"1\"},{\"label\":\"废弃\",\"value\":\"0\"}]";
 
     /**
      * 管理页列表（按 sortNo 排序；"状态"系统字段固定排第一位）
@@ -98,8 +119,8 @@ public class CustomFieldService {
         List<CustomField> fields = customFieldMapper.selectList(wrapper);
         // "状态"字段位置不可修改：展示时固定提到第一位（其余字段保持原相对顺序）
         List<CustomField> ordered = new ArrayList<>();
-        fields.stream().filter(f -> DEFECT_STATUS_FIELD_KEY.equals(f.getFieldKey())).forEach(ordered::add);
-        fields.stream().filter(f -> !DEFECT_STATUS_FIELD_KEY.equals(f.getFieldKey())).forEach(ordered::add);
+        fields.stream().filter(f -> isStatusField(f.getModule(), f.getFieldKey())).forEach(ordered::add);
+        fields.stream().filter(f -> !isStatusField(f.getModule(), f.getFieldKey())).forEach(ordered::add);
         return ordered.stream().map(this::toListItem).collect(Collectors.toList());
     }
 
@@ -168,37 +189,60 @@ public class CustomFieldService {
         if (scopes != null && !scopes.isEmpty()) {
             field.setDisplayScope(joinDisplayScopes(scopes));
         }
-        // "状态"系统字段：必填固定为"是"、显示位置固定为"缺陷详情"，不可被修改
+        // "状态"系统字段：必填固定为"是"、显示位置固定为对应模块的详情，不可被修改
         // （请求值一律忽略，置于 displayScope 转换之后确保覆盖请求值）
-        if (DEFECT_STATUS_FIELD_KEY.equals(field.getFieldKey())) {
+        if (isStatusField(field.getModule(), field.getFieldKey())) {
             field.setIsRequired(1);
-            field.setDisplayScope(DEFECT_STATUS_DISPLAY_SCOPE);
+            field.setDisplayScope(STATUS_DISPLAY_SCOPE);
         }
         customFieldMapper.updateById(field);
         return toListItem(field);
     }
 
     /**
-     * 为项目预置缺陷"状态"字段（【字段管理-编辑缺陷】视图）
+     * 为项目预置缺陷"状态"字段（【页面配置-缺陷字段】视图）
      *
      * <p>新建项目时调用：状态字段是流转状态下拉框的选项来源，须始终可配置；
      * 选项 value 沿用 defect.status 现有英文编码，存量数据无需迁移
      */
     @Transactional(rollbackFor = Exception.class)
     public void createDefaultStatusField(Long projectId) {
+        createStatusField(projectId, "defect", DEFECT_STATUS_FIELD_KEY,
+                "缺陷流转状态下拉框的枚举选项：可增删选项、修改显示名、调整顺序；删除选项后存量缺陷保留原状态值",
+                DEFAULT_DEFECT_STATUS_OPTIONS_JSON);
+    }
+
+    /**
+     * 为项目预置手动用例"状态"字段（【页面配置-手动用例字段】视图）
+     *
+     * <p>新建项目时调用：状态字段是详情页状态下拉框的选项来源，须始终可配置；
+     * 选项 value 与 manual_case.case_status 列值一致（1-使用，0-废弃），存量数据无需迁移
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void createDefaultManualCaseStatusField(Long projectId) {
+        createStatusField(projectId, "manual_case", MANUAL_CASE_STATUS_FIELD_KEY,
+                "手动用例启用状态（使用/废弃）的枚举选项：详情页状态下拉框的选项来源；删除选项后存量用例保留原状态值",
+                DEFAULT_MANUAL_CASE_STATUS_OPTIONS_JSON);
+    }
+
+    /**
+     * 预置模块"状态"字段（统一存 edit 视图）
+     *
+     * <p>状态字段系统预置为必填、显示位置固定为"详情"，且固定排第一位（列表展示与拖拽均锁定位置）
+     */
+    private void createStatusField(Long projectId, String module, String fieldKey,
+                                   String description, String optionsJson) {
         CustomField field = new CustomField();
         field.setProjectId(projectId);
-        field.setModule("defect");
+        field.setModule(module);
         field.setViewType("edit");
-        field.setFieldKey(DEFECT_STATUS_FIELD_KEY);
+        field.setFieldKey(fieldKey);
         field.setFieldLabel("状态");
-        field.setDescription("缺陷流转状态下拉框的枚举选项：可增删选项、修改显示名、调整顺序；删除选项后存量缺陷保留原状态值");
+        field.setDescription(description);
         field.setFieldType("select");
-        field.setOptionsJson(DEFAULT_DEFECT_STATUS_OPTIONS_JSON);
-        // "状态"字段系统预置为必填、显示位置固定为"缺陷详情"，均不可修改
+        field.setOptionsJson(optionsJson);
         field.setIsRequired(1);
-        field.setDisplayScope(DEFECT_STATUS_DISPLAY_SCOPE);
-        // "状态"字段固定排第一位（列表展示与拖拽均锁定位置）
+        field.setDisplayScope(STATUS_DISPLAY_SCOPE);
         field.setSortNo(1);
         field.setIsActive(1);
         customFieldMapper.insert(field);
@@ -213,9 +257,9 @@ public class CustomFieldService {
         if (field == null) {
             throw new BusinessException(ErrorCode.CUSTOM_FIELD_NOT_FOUND, "字段不存在");
         }
-        // 状态字段是流转状态下拉框的选项来源，且新建字段的 fieldKey 为自动生成的 UUID，
+        // 状态字段是状态下拉框的选项来源，且新建字段的 fieldKey 为自动生成的 UUID，
         // 删除后无法重建同 fieldKey 的字段，故禁止删除
-        if (DEFECT_STATUS_FIELD_KEY.equals(field.getFieldKey())) {
+        if (isStatusField(field.getModule(), field.getFieldKey())) {
             throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "系统预置的状态字段不可删除");
         }
         customFieldMapper.deleteById(id);
@@ -269,8 +313,8 @@ public class CustomFieldService {
 
         // "状态"字段位置不可修改：配置中存在状态字段时，其必须位于提交顺序的第一位
         boolean hasStatusField = fields.stream()
-                .anyMatch(f -> DEFECT_STATUS_FIELD_KEY.equals(f.getFieldKey()));
-        if (hasStatusField && !DEFECT_STATUS_FIELD_KEY.equals(fieldMap.get(orderedIds.get(0)).getFieldKey())) {
+                .anyMatch(f -> isStatusField(f.getModule(), f.getFieldKey()));
+        if (hasStatusField && !isStatusField(module, fieldMap.get(orderedIds.get(0)).getFieldKey())) {
             throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "「状态」字段固定排第一位，不能调整其位置");
         }
 
@@ -282,6 +326,13 @@ public class CustomFieldService {
                 customFieldMapper.updateById(item);
             }
         }
+    }
+
+    /**
+     * 判断是否为系统预置的"状态"字段（fieldKey 与模块约定的状态字段一致）
+     */
+    private boolean isStatusField(String module, String fieldKey) {
+        return module != null && fieldKey != null && fieldKey.equals(STATUS_FIELD_KEYS.get(module));
     }
 
     /**

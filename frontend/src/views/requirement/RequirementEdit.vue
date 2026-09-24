@@ -6,10 +6,11 @@
 <script setup lang="ts">
 /**
  * 需求条目编辑/新建
- * 表单：标题、描述、需求类型、优先级、状态、负责人、截止日期；
- * 动态字段统一取【字段管理-需求字段】配置，按"显示位置"区分新建/编辑可见性
+ * 表单：标题、描述、内容（富文本，参考缺陷"内容"）、需求类型、优先级、状态、负责人、截止日期；
+ * 动态字段统一取【页面配置-需求字段】配置，按"显示位置"区分新建/编辑可见性
+ * 内容模板（【页面配置-内容模板】按项目维护）：仅新建时自动填入「内容」编辑框
  */
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
@@ -19,9 +20,12 @@ import {
   updateRequirementItem,
 } from '@/api/requirement'
 import { getCustomFieldsForRender } from '@/api/customField'
+import { getContentTemplates } from '@/api/contentTemplate'
 import PageHeader from '@/components/PageHeader/index.vue'
 import DynamicFieldGrid from '@/components/DynamicFieldGrid/index.vue'
 import { isScopeVisible } from '@/utils/customFieldScope'
+import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
+import '@wangeditor/editor/dist/css/style.css'
 
 const route = useRoute()
 const router = useRouter()
@@ -47,12 +51,50 @@ const visibleCustomFields = computed(() =>
 const form = reactive({
   title: '',
   description: '',
+  content: '',
   reqType: 'FEATURE',
   priority: 'MEDIUM',
   status: 'PENDING',
   assignee: '',
   deadline: '',
 })
+
+// ===== 内容（富文本：与缺陷/手动用例"内容"同款编辑器；新建页自动填入【页面配置-内容模板】） =====
+const editorRef = shallowRef<any>(null)
+const editorConfig = {
+  placeholder: '请输入需求内容...',
+  // 本页不提供全屏入口（表单内嵌编辑器），工具栏内置全屏一并排除
+  excludeKeys: ['fullScreen'],
+  MENU_CONF: {
+    uploadImage: { disabled: true },
+    uploadVideo: { disabled: true },
+  },
+}
+function onEditorCreated(editor: any) {
+  editorRef.value = editor
+}
+
+/**
+ * 新建模式：加载「需求」内容模板并自动填入内容区（模板内容非空时）；
+ * 模板仅作用于新建页，进入页面即填充，无需手动套用
+ */
+async function applyContentTemplateOnCreate() {
+  if (!isNew.value) return
+  try {
+    const res: any = await getContentTemplates({ projectId: projectId.value, bizType: 'requirement' })
+    const tpl = (res.data || [])[0]
+    if (tpl && stripHtml(tpl.content || '')) {
+      form.content = tpl.content
+    }
+  } catch {
+    // 模板加载失败不阻塞新建页（内容留空由用户自行填写）
+  }
+}
+
+/** 去除富文本标签，保留纯文本（内容模板非空判断用） */
+function stripHtml(html: string): string {
+  return (html || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()
+}
 
 const rules = reactive<FormRules>({
   title: [
@@ -70,12 +112,13 @@ async function fetchDetail() {
     if (data) {
       form.title = data.title || ''
       form.description = data.description || ''
+      form.content = data.content || ''
       form.reqType = data.reqType || 'FEATURE'
       form.priority = data.priority || 'MEDIUM'
       form.status = data.status || 'PENDING'
       form.assignee = data.assignee || ''
       form.deadline = data.deadline || ''
-      // 动态字段值回显（后端按【字段管理-需求字段】配置返回）
+      // 动态字段值回显（后端按【页面配置-需求字段】配置返回）
       customFieldValues.value = { ...(data.customFields || {}) }
     }
   } catch (e: any) {
@@ -93,6 +136,7 @@ async function handleSave() {
       const payload = {
         title: form.title,
         description: form.description || undefined,
+        content: form.content || undefined,
         reqType: form.reqType,
         priority: form.priority,
         status: form.status,
@@ -127,11 +171,12 @@ function handleCancel() {
 onMounted(() => {
   fetchDetail()
   fetchCustomFields()
+  applyContentTemplateOnCreate()
 })
 
 async function fetchCustomFields() {
   try {
-    // 新建/编辑统一取【字段管理-需求字段】配置（统一存 edit 视图），由"显示位置"区分可见性
+    // 新建/编辑统一取【页面配置-需求字段】配置（统一存 edit 视图），由"显示位置"区分可见性
     const res: any = await getCustomFieldsForRender({
       projectId: projectId.value,
       module: 'requirement',
@@ -171,6 +216,13 @@ async function fetchCustomFields() {
           </el-form-item>
           <el-form-item label="描述" prop="description">
             <el-input v-model="form.description" type="textarea" :rows="4" placeholder="需求详细描述" />
+          </el-form-item>
+          <el-form-item label="内容" prop="content">
+            <!-- 富文本内容（新建时自动填入【页面配置-需求内容模板】，可继续编辑；随表单保存） -->
+            <div class="req-editor-wrapper">
+              <Toolbar :editor="editorRef" :default-config="editorConfig" mode="default" style="border-bottom: 1px solid #ccc" />
+              <Editor v-model="form.content" :default-config="editorConfig" mode="default" style="height: 300px; overflow-y: hidden" @on-created="onEditorCreated" />
+            </div>
           </el-form-item>
         </div>
 
@@ -258,5 +310,12 @@ async function fetchCustomFields() {
 }
 .form-row > * {
   min-width: 0;
+}
+/* 内容富文本编辑器容器（与缺陷/手动用例"内容"编辑器容器风格一致） */
+.req-editor-wrapper {
+  width: 100%;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  overflow: hidden;
 }
 </style>

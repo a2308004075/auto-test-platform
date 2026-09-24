@@ -25,6 +25,8 @@ public class RequirementItemResponse {
 
     private String description;
 
+    private String content;
+
     private String reqType;
 
     private String priority;
@@ -42,7 +44,7 @@ public class RequirementItemResponse {
     private LocalDateTime updatedAt;
 
     /**
-     * 自定义字段值（fieldKey -> 字段值，由【字段管理】动态配置驱动）
+     * 自定义字段值（fieldKey -> 字段值，由【页面配置】动态配置驱动）
      */
     private Map<String, String> customFields;
 }

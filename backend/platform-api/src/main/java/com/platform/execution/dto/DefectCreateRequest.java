@@ -68,7 +68,7 @@ public class DefectCreateRequest implements Serializable {
     private List<DefectAttachmentCreateRequest> attachments;
 
     /**
-     * 自定义字段值（fieldKey -> 值，由【字段管理】动态配置驱动）
+     * 自定义字段值（fieldKey -> 值，由【页面配置】动态配置驱动）
      */
     private Map<String, String> customFields;
 }
