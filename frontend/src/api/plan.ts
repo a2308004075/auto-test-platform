@@ -41,6 +41,14 @@ export function deletePlan(planId: number) {
   return request.post(`/v1/plans/${planId}/delete`)
 }
 
+/**
+ * 更新计划关联用例的动态字段值（详情页用例表格行内即时保存，如台架/整站是否执行）
+ * @param relationId 计划-用例关联行 ID（test_plan_manual_case.id）
+ */
+export function updatePlanCaseFields(planId: number, relationId: number, fieldValues: Record<string, string>) {
+  return request.post(`/v1/plans/${planId}/cases/${relationId}/fields`, { fieldValues })
+}
+
 // ===== 计划分组 API =====
 
 export function getPlanGroups(projectId: number) {

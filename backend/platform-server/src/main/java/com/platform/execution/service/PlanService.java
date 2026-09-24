@@ -8,11 +8,15 @@ package com.platform.execution.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.auth.entity.User;
 import com.platform.common.exception.BusinessException;
 import com.platform.common.exception.ErrorCode;
 import com.platform.common.response.PageResponse;
+import com.platform.execution.dto.AutoSuiteBriefDTO;
+import com.platform.execution.dto.ManualCaseBriefDTO;
+import com.platform.execution.dto.PlanCaseFieldUpdateRequest;
 import com.platform.execution.dto.PlanCreateRequest;
 import com.platform.execution.dto.PlanResponse;
 import com.platform.execution.dto.PlanUpdateRequest;
@@ -21,6 +25,7 @@ import com.platform.execution.mapper.*;
 import com.platform.environment.entity.Environment;
 import com.platform.environment.mapper.EnvironmentMapper;
 import com.platform.project.service.ProjectService;
+import com.platform.sys.service.CustomFieldValueService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
@@ -35,6 +40,8 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 测试计划服务
@@ -44,6 +51,11 @@ import java.util.List;
 @Slf4j
 public class PlanService {
 
+    /**
+     * 计划-用例关联级动态字段模块标识（sys_custom_field.module，entity_id=test_plan_manual_case.id）
+     */
+    private static final String PLAN_CASE_FIELD_MODULE = "plan_case";
+
     private final TestPlanMapper testPlanMapper;
     private final PlanGroupMapper planGroupMapper;
     private final ProjectService projectService;
@@ -52,6 +64,8 @@ public class PlanService {
     private final AutoSuiteMapper autoSuiteMapper;
     private final AutoCaseMapper autoCaseMapper;
     private final ManualCaseMapper manualCaseMapper;
+    private final TestPlanManualCaseMapper testPlanManualCaseMapper;
+    private final CustomFieldValueService customFieldValueService;
     private final ObjectMapper objectMapper;
 
     /**
@@ -191,6 +205,10 @@ public class PlanService {
         plan.setIsActive(1);
         plan.setCreatedBy(getCurrentUserId());
         testPlanMapper.insert(plan);
+        // 同步维护计划-用例关联表（权威数据源，关联级动态字段值的挂载实体）
+        if (request.getManualCaseIds() != null) {
+            applyManualCaseRelations(plan, request.getManualCaseIds());
+        }
         return toResponse(plan);
     }
 
@@ -240,15 +258,20 @@ public class PlanService {
         }
 
         testPlanMapper.updateById(plan);
+        // 同步维护计划-用例关联表（权威数据源；交集保留原顺序，差集删除并清理字段值，新增追加尾部）
+        if (request.getManualCaseIds() != null) {
+            applyManualCaseRelations(plan, request.getManualCaseIds());
+        }
         return toResponse(plan);
     }
 
     /**
-     * 删除测试计划
+     * 删除测试计划（关联行由外键级联删除，关联级字段值需显式清理）
      */
     @Transactional(rollbackFor = Exception.class)
     public void deletePlan(Long planId) {
         findById(planId);
+        deletePlanCaseFieldValues(Collections.singletonList(planId));
         testPlanMapper.deleteById(planId);
     }
 
@@ -268,7 +291,7 @@ public class PlanService {
             // 指定分组（含子孙分组递归）
             wrapper.in(TestPlan::getGroupId, getDescendantGroupIds(groupId));
         }
-        testPlanMapper.delete(wrapper);
+        deletePlansWithCaseFieldValues(wrapper);
     }
 
     /**
@@ -278,7 +301,52 @@ public class PlanService {
     public void clearByProject(Long projectId) {
         LambdaQueryWrapper<TestPlan> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(TestPlan::getProjectId, projectId);
+        deletePlansWithCaseFieldValues(wrapper);
+    }
+
+    /**
+     * 按条件删除计划前，先显式清理计划-用例关联行上的动态字段值
+     * （关联行本身由外键级联随计划删除，sys_custom_field_value 无外键需显式清理）
+     */
+    private void deletePlansWithCaseFieldValues(LambdaQueryWrapper<TestPlan> wrapper) {
+        wrapper.select(TestPlan::getId);
+        List<Long> planIds = testPlanMapper.selectList(wrapper).stream()
+                .map(TestPlan::getId)
+                .collect(Collectors.toList());
+        deletePlanCaseFieldValues(planIds);
         testPlanMapper.delete(wrapper);
+    }
+
+    /**
+     * 批量清理计划用例关联行上的动态字段值（module=plan_case）
+     */
+    private void deletePlanCaseFieldValues(List<Long> planIds) {
+        if (planIds == null || planIds.isEmpty()) {
+            return;
+        }
+        LambdaQueryWrapper<TestPlanManualCase> relWrapper = new LambdaQueryWrapper<>();
+        relWrapper.in(TestPlanManualCase::getPlanId, planIds)
+                .select(TestPlanManualCase::getId);
+        List<Long> relationIds = testPlanManualCaseMapper.selectList(relWrapper).stream()
+                .map(TestPlanManualCase::getId)
+                .collect(Collectors.toList());
+        customFieldValueService.deleteByEntities(PLAN_CASE_FIELD_MODULE, relationIds);
+    }
+
+    /**
+     * 更新计划关联用例的动态字段值（行内即时保存，如台架是否执行/整站是否执行）
+     *
+     * @param relationId 计划-用例关联行 ID（test_plan_manual_case.id）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void updateCaseFieldValues(Long planId, Long relationId, PlanCaseFieldUpdateRequest request) {
+        TestPlan plan = findById(planId);
+        TestPlanManualCase relation = testPlanManualCaseMapper.selectById(relationId);
+        if (relation == null || !planId.equals(relation.getPlanId())) {
+            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "计划用例关联不存在：" + relationId);
+        }
+        customFieldValueService.saveValues(plan.getProjectId(), PLAN_CASE_FIELD_MODULE, "edit",
+                relationId, request.getFieldValues());
     }
 
     private TestPlan findById(Long planId) {
@@ -293,7 +361,7 @@ public class PlanService {
         PlanResponse resp = new PlanResponse();
         BeanUtils.copyProperties(plan, resp);
         resp.setAutoSuiteIds(parseIdList(plan.getAutoSuiteIds()));
-        resp.setManualCaseIds(parseIdList(plan.getManualCaseIds()));
+        // manualCaseIds 与明细改从关联表读取（权威数据源，见下方），JSON 列仅作写镜像
 
         // 获取环境名称
         if (plan.getEnvironmentId() != null) {
@@ -303,9 +371,10 @@ public class PlanService {
             }
         }
 
-        // 获取自动化套件名称列表
+        // 获取自动化套件名称列表与明细
         List<Long> autoSuiteIdList = resp.getAutoSuiteIds();
         List<String> autoSuiteNames = new ArrayList<>();
+        List<AutoSuiteBriefDTO> autoSuiteDetails = new ArrayList<>();
         int caseCount = 0;
         for (Long autoSuiteId : autoSuiteIdList) {
             AutoSuite suite = autoSuiteMapper.selectById(autoSuiteId);
@@ -315,23 +384,49 @@ public class PlanService {
                 LambdaQueryWrapper<AutoCase> caseWrapper = new LambdaQueryWrapper<>();
                 caseWrapper.eq(AutoCase::getAutoSuiteId, autoSuiteId)
                         .eq(AutoCase::getIsActive, 1);
-                caseCount += Math.toIntExact(autoCaseMapper.selectCount(caseWrapper));
+                int suiteCaseCount = Math.toIntExact(autoCaseMapper.selectCount(caseWrapper));
+                caseCount += suiteCaseCount;
+                AutoSuiteBriefDTO suiteBrief = new AutoSuiteBriefDTO();
+                suiteBrief.setId(suite.getId());
+                suiteBrief.setName(suite.getName());
+                suiteBrief.setCaseCount(suiteCaseCount);
+                autoSuiteDetails.add(suiteBrief);
             }
         }
         resp.setAutoSuiteNames(autoSuiteNames);
         resp.setCaseCount(caseCount);
+        resp.setAutoSuiteDetails(autoSuiteDetails);
 
-        // 获取手动化用例名称列表
-        List<Long> manualCaseIdList = resp.getManualCaseIds();
+        // 获取手动化用例名称列表与明细（关联表为权威读源，含关联级动态字段值）
+        List<TestPlanManualCase> caseRelations = listCaseRelations(plan.getId());
+        List<Long> manualCaseIdList = caseRelations.stream()
+                .map(TestPlanManualCase::getManualCaseId)
+                .collect(Collectors.toList());
+        List<Long> relationIds = caseRelations.stream()
+                .map(TestPlanManualCase::getId)
+                .collect(Collectors.toList());
+        Map<Long, Map<String, String>> fieldValuesByRelation =
+                customFieldValueService.loadValuesBatch(plan.getProjectId(), PLAN_CASE_FIELD_MODULE, relationIds);
         List<String> manualCaseNames = new ArrayList<>();
-        for (Long manualCaseId : manualCaseIdList) {
-            ManualCase manualCase = manualCaseMapper.selectById(manualCaseId);
+        List<ManualCaseBriefDTO> manualCaseDetails = new ArrayList<>();
+        for (TestPlanManualCase relation : caseRelations) {
+            ManualCase manualCase = manualCaseMapper.selectById(relation.getManualCaseId());
             if (manualCase != null) {
                 manualCaseNames.add(manualCase.getTitle());
+                ManualCaseBriefDTO caseBrief = new ManualCaseBriefDTO();
+                caseBrief.setId(manualCase.getId());
+                caseBrief.setTitle(manualCase.getTitle());
+                caseBrief.setCaseStatus(manualCase.getCaseStatus());
+                caseBrief.setRelationId(relation.getId());
+                caseBrief.setFieldValues(fieldValuesByRelation.getOrDefault(
+                        relation.getId(), Collections.emptyMap()));
+                manualCaseDetails.add(caseBrief);
             }
         }
+        resp.setManualCaseIds(manualCaseIdList);
         resp.setManualCaseNames(manualCaseNames);
         resp.setManualCaseCount(manualCaseNames.size());
+        resp.setManualCaseDetails(manualCaseDetails);
 
         // 获取最近一次执行记录（COMPLETED 状态）
         LambdaQueryWrapper<TestExecution> execWrapper = new LambdaQueryWrapper<>();
@@ -356,15 +451,72 @@ public class PlanService {
         return resp;
     }
 
-    @SuppressWarnings("unchecked")
     private List<Long> parseIdList(String json) {
         if (json == null || json.trim().isEmpty()) {
             return Collections.emptyList();
         }
         try {
-            return objectMapper.readValue(json, List.class);
+            // 指定 List<Long> 元素类型：无类型反序列化会得到 List<Integer>，
+            // 强转 Long 时抛 ClassCastException（PlanExecutor/ExecutionService 同款写法）
+            return objectMapper.readValue(json, new TypeReference<List<Long>>() {});
         } catch (Exception e) {
             return Collections.emptyList();
+        }
+    }
+
+    /**
+     * 查询计划的用例关联行（按计划内顺序排序）
+     */
+    private List<TestPlanManualCase> listCaseRelations(Long planId) {
+        LambdaQueryWrapper<TestPlanManualCase> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(TestPlanManualCase::getPlanId, planId)
+                .orderByAsc(TestPlanManualCase::getSortNo)
+                .orderByAsc(TestPlanManualCase::getId);
+        return testPlanManualCaseMapper.selectList(wrapper);
+    }
+
+    /**
+     * 按提交的用例 ID 列表同步维护计划-用例关联表（权威数据源）
+     *
+     * <p>diff 语义：交集保留原关联行与顺序（关联级字段值随行保留），
+     * 差集删除关联行并清理其字段值，新增用例追加到尾部；
+     * test_plan.manual_case_ids JSON 列仅作写镜像，由调用方负责同步
+     */
+    private void applyManualCaseRelations(TestPlan plan, List<Long> caseIds) {
+        if (caseIds == null) {
+            return;
+        }
+        List<TestPlanManualCase> existing = listCaseRelations(plan.getId());
+        Map<Long, TestPlanManualCase> existingMap = existing.stream()
+                .collect(Collectors.toMap(TestPlanManualCase::getManualCaseId, r -> r, (a, b) -> a));
+
+        // 新列表去重（保持提交顺序）
+        List<Long> distinctIds = caseIds.stream().distinct().collect(Collectors.toList());
+
+        // 删除：不在新列表中的关联行 + 其关联级字段值
+        List<Long> removedRelationIds = existing.stream()
+                .filter(r -> !distinctIds.contains(r.getManualCaseId()))
+                .map(TestPlanManualCase::getId)
+                .collect(Collectors.toList());
+        if (!removedRelationIds.isEmpty()) {
+            customFieldValueService.deleteByEntities(PLAN_CASE_FIELD_MODULE, removedRelationIds);
+            testPlanManualCaseMapper.deleteBatchIds(removedRelationIds);
+        }
+
+        // 追加：新列表中尚无关联行的用例（追尾到现有顺序之后）
+        int nextSortNo = existing.stream()
+                .mapToInt(r -> r.getSortNo() != null ? r.getSortNo() : 0)
+                .max()
+                .orElse(0);
+        for (Long caseId : distinctIds) {
+            if (!existingMap.containsKey(caseId)) {
+                nextSortNo++;
+                TestPlanManualCase relation = new TestPlanManualCase();
+                relation.setPlanId(plan.getId());
+                relation.setManualCaseId(caseId);
+                relation.setSortNo(nextSortNo);
+                testPlanManualCaseMapper.insert(relation);
+            }
         }
     }
 

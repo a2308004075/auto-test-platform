@@ -21,10 +21,12 @@ import com.platform.execution.entity.AutoCase;
 import com.platform.execution.entity.ManualCase;
 import com.platform.execution.entity.TestExecution;
 import com.platform.execution.entity.TestPlan;
+import com.platform.execution.entity.TestPlanManualCase;
 import com.platform.execution.entity.TestResult;
 import com.platform.execution.mapper.AutoCaseMapper;
 import com.platform.execution.mapper.ManualCaseMapper;
 import com.platform.execution.mapper.TestExecutionMapper;
+import com.platform.execution.mapper.TestPlanManualCaseMapper;
 import com.platform.execution.mapper.TestPlanMapper;
 import com.platform.execution.mapper.TestResultMapper;
 import com.platform.execution.mq.ExecutionMessage;
@@ -68,6 +70,7 @@ public class ExecutionService {
     private final TestResultMapper testResultMapper;
     private final AutoCaseMapper autoCaseMapper;
     private final ManualCaseMapper manualCaseMapper;
+    private final TestPlanManualCaseMapper testPlanManualCaseMapper;
     private final EnvironmentMapper environmentMapper;
     private final ExecutionProducer executionProducer;
     private final ObjectMapper objectMapper;
@@ -274,6 +277,7 @@ public class ExecutionService {
 
     /**
      * 计算计划实际会执行的自动化与手动化用例总数。
+     * 手动化用例改从计划-用例关联表读取（权威读源，test_plan.manual_case_ids JSON 列仅作写镜像）。
      */
     private int countPlannedCases(TestPlan plan) {
         int total = 0;
@@ -283,8 +287,10 @@ public class ExecutionService {
                     .eq(AutoCase::getIsActive, true);
             total += autoCaseMapper.selectCount(wrapper);
         }
-        for (Long manualCaseId : parseIdList(plan.getManualCaseIds())) {
-            if (manualCaseMapper.selectById(manualCaseId) != null) {
+        LambdaQueryWrapper<TestPlanManualCase> relWrapper = new LambdaQueryWrapper<>();
+        relWrapper.eq(TestPlanManualCase::getPlanId, plan.getId());
+        for (TestPlanManualCase relation : testPlanManualCaseMapper.selectList(relWrapper)) {
+            if (manualCaseMapper.selectById(relation.getManualCaseId()) != null) {
                 total++;
             }
         }

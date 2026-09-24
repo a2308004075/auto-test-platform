@@ -51,10 +51,16 @@ const MODULE_CHILDREN: PageNode[] = [
   { label: '内容模板', page: 'template' },
 ]
 
+// 测试计划模块仅【字段设置】：关联用例字段（台架/整站是否执行等）无新建页，仅显示于计划详情页
+const FIELD_ONLY_CHILDREN: PageNode[] = [
+  { label: '字段设置', page: 'field' },
+]
+
 const moduleTree: ModuleNode[] = [
   { label: '缺陷', module: 'defect', children: MODULE_CHILDREN },
   { label: '手动用例', module: 'manual_case', children: MODULE_CHILDREN },
   { label: '需求', module: 'requirement', children: MODULE_CHILDREN },
+  { label: '测试计划', module: 'plan_case', children: FIELD_ONLY_CHILDREN },
 ]
 
 // 树展开状态（根=项目，模块=功能页，默认全部展开）
@@ -63,6 +69,7 @@ const moduleExpanded = reactive<Record<string, boolean>>({
   defect: true,
   manual_case: true,
   requirement: true,
+  plan_case: true,
 })
 
 function toggleRoot() {
@@ -110,12 +117,18 @@ const fieldTypeLabelMap: Record<string, string> = {
 }
 
 // 显示位置：多选（create=新建显示 / detail=详情(编辑)显示），选项文案按当前模块动态生成（缺陷/手动用例/需求）
-const MODULE_SHORT_NAMES: Record<string, string> = { defect: '缺陷', manual_case: '手动用例', requirement: '需求' }
+const MODULE_SHORT_NAMES: Record<string, string> = { defect: '缺陷', manual_case: '手动用例', requirement: '需求', plan_case: '测试计划' }
 const moduleShortName = computed(() => MODULE_SHORT_NAMES[selectedModule.value] || '需求')
-const displayScopeOptions = computed(() => [
-  { label: `新建${moduleShortName.value}`, value: 'create' },
-  { label: `${moduleShortName.value}详情`, value: 'detail' },
-])
+// 测试计划模块无新建页：字段仅显示于计划详情页（仅提供"详情"单项）
+const displayScopeOptions = computed(() => {
+  if (selectedModule.value === 'plan_case') {
+    return [{ label: '测试计划详情', value: 'detail' }]
+  }
+  return [
+    { label: `新建${moduleShortName.value}`, value: 'create' },
+    { label: `${moduleShortName.value}详情`, value: 'detail' },
+  ]
+})
 
 /** 列表"显示位置"标签：双值=都显示；单值=新建X / X详情 */
 function scopeLabel(scope: unknown): string {
@@ -255,6 +268,10 @@ function resetForm() {
 
 function openCreate() {
   resetForm()
+  // 测试计划模块：关联用例字段仅显示于计划详情页（预填且不可取消，选项列表也只有该项）
+  if (selectedModule.value === 'plan_case') {
+    form.displayScope = ['detail']
+  }
   dialogVisible.value = true
 }
 

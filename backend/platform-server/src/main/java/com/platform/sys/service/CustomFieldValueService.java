@@ -215,6 +215,20 @@ public class CustomFieldValueService {
         customFieldValueMapper.delete(wrapper);
     }
 
+    /**
+     * 批量删除多个业务实体的全部自定义字段值（计划-用例关联行批量清理时使用）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteByEntities(String module, List<Long> entityIds) {
+        if (entityIds == null || entityIds.isEmpty()) {
+            return;
+        }
+        LambdaQueryWrapper<CustomFieldValue> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(CustomFieldValue::getModule, module)
+                .in(CustomFieldValue::getEntityId, entityIds);
+        customFieldValueMapper.delete(wrapper);
+    }
+
     // ===== 私有方法 =====
 
     private void upsertValue(Long fieldId, String module, Long entityId, String value) {

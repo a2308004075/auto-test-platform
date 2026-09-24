@@ -145,9 +145,8 @@ export function addSupplementaryRoutes(router: Router, layoutName: string): void
     { path: 'project/:id/defects/new',              component: 'defect/DefectDetail', title: '新建缺陷' },
     { path: 'project/:id/defects/:defectId',         component: 'defect/DefectDetail', title: '缺陷详情' },
 
-    // ===== 测试计划/执行模块 =====
-    { path: 'project/:id/plans/new',                       component: 'execution/PlanEdit',        title: '新建计划' },
-    { path: 'project/:id/plans/:planId/edit',              component: 'execution/PlanEdit',        title: '编辑计划' },
+    // ===== 测试计划/执行模块（新建改为列表页弹窗，详情统一视图 PlanDetail） =====
+    { path: 'project/:id/plans/:planId',                   component: 'execution/PlanDetail',      title: '测试计划详情' },
     { path: 'project/:id/executions/:executionId',         component: 'execution/ExecutionDetail', title: '执行详情' },
 
     // ===== 需求文档模块 =====

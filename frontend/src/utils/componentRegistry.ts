@@ -78,7 +78,7 @@ export const componentMap: Record<string, () => Promise<any>> = {
 
   // ===== 测试计划/执行模块 =====
   'execution/PlanList': () => import('@/views/execution/PlanList.vue'),
-  'execution/PlanEdit': () => import('@/views/execution/PlanEdit.vue'),
+  'execution/PlanDetail': () => import('@/views/execution/PlanDetail.vue'),
   'execution/ExecutionList': () => import('@/views/execution/ExecutionList.vue'),
   'execution/ExecutionDetail': () => import('@/views/execution/ExecutionDetail.vue'),
 

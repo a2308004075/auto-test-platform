@@ -20,6 +20,10 @@ const props = defineProps<{
   projectId: number
   /** 是否多选（默认多选） */
   multiple?: boolean
+  /** 锁定用例类型 Tab（传入时隐藏 Tab 栏且不可切换，如 MANUAL_CASE） */
+  fixedTab?: string
+  /** 不可勾选的用例 ID 列表（已关联的用例置灰，避免重复添加） */
+  excludeIds?: number[]
 }>()
 
 const emit = defineEmits<{
@@ -45,6 +49,10 @@ watch(
   () => props.visible,
   (visible) => {
     if (visible) {
+      // 锁定 Tab 模式：每次打开时归位到指定类型
+      if (props.fixedTab) {
+        activeTab.value = props.fixedTab
+      }
       keyword.value = ''
       selectedRows.value = []
       pagination.current = 1
@@ -109,6 +117,11 @@ function handleSelectionChange(rows: any[]) {
   selectedRows.value = rows
 }
 
+function selectable(row: any) {
+  // 已关联的用例不可再勾选
+  return !props.excludeIds?.includes(row.id)
+}
+
 function handleRowClick(row: any) {
   // 单选模式：点击行即选中并确认
   if (!props.multiple) {
@@ -129,7 +142,7 @@ function handleConfirm() {
 
 <template>
   <el-dialog v-model="dialogVisible" title="选择用例" width="640px" destroy-on-close>
-    <el-tabs v-model="activeTab" @tab-change="switchTab">
+    <el-tabs v-if="!fixedTab" v-model="activeTab" @tab-change="switchTab">
       <el-tab-pane
         v-for="opt in caseTypeOptions"
         :key="opt.value"
@@ -158,7 +171,7 @@ function handleConfirm() {
       @selection-change="handleSelectionChange"
       @row-click="handleRowClick"
     >
-      <el-table-column v-if="multiple" type="selection" width="45" />
+      <el-table-column v-if="multiple" type="selection" width="45" :selectable="selectable" />
       <el-table-column prop="id" label="ID" width="80" />
       <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip />
       <el-table-column prop="priority" label="优先级" width="80" />

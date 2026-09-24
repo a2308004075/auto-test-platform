@@ -13,11 +13,13 @@ import com.platform.execution.entity.AutoSuite;
 import com.platform.execution.entity.ManualCase;
 import com.platform.execution.entity.TestExecution;
 import com.platform.execution.entity.TestPlan;
+import com.platform.execution.entity.TestPlanManualCase;
 import com.platform.execution.entity.TestResult;
 import com.platform.execution.mapper.AutoCaseMapper;
 import com.platform.execution.mapper.AutoSuiteMapper;
 import com.platform.execution.mapper.ManualCaseMapper;
 import com.platform.execution.mapper.TestExecutionMapper;
+import com.platform.execution.mapper.TestPlanManualCaseMapper;
 import com.platform.execution.mapper.TestPlanMapper;
 import com.platform.execution.mapper.TestResultMapper;
 import com.platform.execution.websocket.ExecutionWebSocketHandler;
@@ -28,6 +30,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * 测试计划执行器
@@ -52,6 +55,7 @@ public class PlanExecutor {
     private final AutoSuiteMapper autoSuiteMapper;
     private final AutoCaseMapper autoCaseMapper;
     private final ManualCaseMapper manualCaseMapper;
+    private final TestPlanManualCaseMapper testPlanManualCaseMapper;
     private final EnvironmentService environmentService;
     private final ObjectMapper objectMapper;
     private final ExecutionWebSocketHandler executionWebSocketHandler;
@@ -101,9 +105,9 @@ public class PlanExecutor {
             ExecutionContext context = buildContext(execution, plan);
             log.info("开始执行计划: plan={}, execution={}, env={}", plan.getName(), executionId, context.getEnvironmentId());
 
-            // 解析 autoSuiteIds 与 manualCaseIds
+            // 解析 autoSuiteIds（JSON 列），manualCaseIds 改从关联表读取（权威读源，按计划内顺序）
             List<Long> autoSuiteIds = parseIdList(plan.getAutoSuiteIds());
-            List<Long> manualCaseIds = parseIdList(plan.getManualCaseIds());
+            List<Long> manualCaseIds = listManualCaseIds(plan.getId());
             if (autoSuiteIds.isEmpty() && manualCaseIds.isEmpty()) {
                 log.warn("计划未关联任何自动化套件或手动化用例: {}", plan.getName());
             }
@@ -253,6 +257,19 @@ public class PlanExecutor {
             total += autoCaseMapper.selectCount(wrapper);
         }
         return total;
+    }
+
+    /**
+     * 从计划-用例关联表读取手动化用例 ID 列表（权威读源，test_plan.manual_case_ids JSON 列仅作写镜像）
+     */
+    private List<Long> listManualCaseIds(Long planId) {
+        LambdaQueryWrapper<TestPlanManualCase> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(TestPlanManualCase::getPlanId, planId)
+                .orderByAsc(TestPlanManualCase::getSortNo)
+                .orderByAsc(TestPlanManualCase::getId);
+        return testPlanManualCaseMapper.selectList(wrapper).stream()
+                .map(TestPlanManualCase::getManualCaseId)
+                .collect(Collectors.toList());
     }
 
     /**

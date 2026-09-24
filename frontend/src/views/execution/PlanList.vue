@@ -13,7 +13,7 @@ import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown } from '@element-plus/icons-vue'
-import { getPlans, deletePlan, getPlanGroups, createPlanGroup, updatePlanGroup, deletePlanGroup, clearGroupPlans, clearProjectPlans } from '@/api/plan'
+import { getPlans, createPlan, updatePlan, deletePlan, getPlanGroups, createPlanGroup, updatePlanGroup, deletePlanGroup, clearGroupPlans, clearProjectPlans } from '@/api/plan'
 import { startExecution } from '@/api/execution'
 import { getEnvironments } from '@/api/environment'
 import { useDict } from '@/composables/useDict'
@@ -319,14 +319,155 @@ async function fetchList() {
   } catch { list.value = [] } finally { loading.value = false }
 }
 
-// ===== 操作 =====
-function handleCreate(planType: string) {
-  router.push(`/project/${projectId.value}/plans/new?planType=${planType}`)
+// ===== 新建计划弹窗（创建成功后留在列表页，关联内容由「关联用例」独立页维护） =====
+const createModalVisible = ref(false)
+const creating = ref(false)
+const createForm = reactive({
+  planType: 'AUTO' as string,
+  name: '',
+  groupId: null as number | null,
+  description: '',
+})
+
+function openCreateModal(planType: string) {
+  Object.assign(createForm, { planType, name: '', groupId: null, description: '' })
+  createModalVisible.value = true
 }
 
-function handleEdit(record: any) {
-  router.push(`/project/${projectId.value}/plans/${record.id}/edit`)
+async function handleCreateSubmit() {
+  if (!createForm.name.trim()) {
+    ElMessage.warning('请输入计划名称')
+    return
+  }
+  creating.value = true
+  try {
+    await createPlan(projectId.value, {
+      name: createForm.name,
+      planType: createForm.planType,
+      groupId: createForm.groupId,
+      description: createForm.description || undefined,
+    })
+    ElMessage.success('创建成功')
+    createModalVisible.value = false
+    // 创建成功后留在列表页刷新；需要关联用例/套件时由操作列「关联用例」进入独立页
+    fetchGroups()
+    fetchList()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '创建失败')
+  } finally {
+    creating.value = false
+  }
 }
+
+// ===== 操作 =====
+/** 跳转关联内容独立页（手动计划=手动化用例 / 自动计划=自动化套件） */
+function handleRelate(record: any) {
+  router.push(`/project/${projectId.value}/plans/${record.id}`)
+}
+
+// ===== 编辑计划弹窗（基础信息 + 执行策略；关联内容在独立页维护） =====
+const editModalVisible = ref(false)
+const editing = ref(false)
+const editingPlan = ref<any>(null)
+const editForm = reactive({
+  name: '',
+  description: '',
+  planType: 'AUTO' as string,
+  groupId: null as number | null,
+  environmentId: null as number | null,
+  scheduleCron: '',
+  triggerType: 'MANUAL',
+  isActive: 1,
+})
+
+const editIsManual = computed(() => editForm.planType === 'MANUAL')
+
+/** 打开编辑弹窗：直接用列表行数据填充（列表与详情共用同一 PlanResponse，字段完整） */
+function openEditModal(record: any) {
+  editingPlan.value = record
+  Object.assign(editForm, {
+    name: record.name || '',
+    description: record.description || '',
+    planType: record.planType || 'AUTO',
+    groupId: record.groupId ?? null,
+    environmentId: record.environmentId ?? null,
+    scheduleCron: record.scheduleCron || '',
+    triggerType: record.triggerType || 'MANUAL',
+    isActive: record.isActive ?? 1,
+  })
+  editModalVisible.value = true
+}
+
+async function handleEditSubmit() {
+  if (!editForm.name.trim()) { ElMessage.warning('请输入计划名称'); return }
+  editing.value = true
+  try {
+    const data: any = {
+      name: editForm.name,
+      description: editForm.description,
+      groupId: editForm.groupId,
+    }
+    // groupId 为 null 表示清除分组（归入"未分组"）
+    if (editForm.groupId === null) {
+      data.clearGroup = true
+    }
+    if (!editIsManual.value) {
+      data.environmentId = editForm.environmentId
+      data.scheduleCron = editForm.scheduleCron
+      data.triggerType = editForm.triggerType
+      data.isActive = editForm.isActive
+    }
+    await updatePlan(editingPlan.value.id, data)
+    ElMessage.success('保存成功')
+    editModalVisible.value = false
+    // 名称/分组变化影响分组树计数与列表展示
+    fetchGroups()
+    fetchList()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '保存失败')
+  } finally {
+    editing.value = false
+  }
+}
+
+// ===== Cron 可读性解析（编辑弹窗定时执行配置） =====
+function parseCronReadable(cron: string): string {
+  if (!cron || !cron.trim()) return ''
+  const parts = cron.trim().split(/\s+/)
+  if (parts.length < 5) return '表达式格式不完整'
+  try {
+    const [min, hour, day, month, week] = parts
+    if (week !== '*' && week !== '?') {
+      const weekMap: Record<string, string> = { '0': '周日', '1': '周一', '2': '周二', '3': '周三', '4': '周四', '5': '周五', '6': '周六', '7': '周日' }
+      return `每${weekMap[week] || week} ${hour}:${min.padStart(2, '0')} 执行`
+    }
+    if (day === '*' && month === '*') return `每天 ${hour}:${min.padStart(2, '0')} 执行`
+    return `Cron: ${cron}`
+  } catch {
+    return `Cron: ${cron}`
+  }
+}
+
+const cronReadable = computed(() => parseCronReadable(editForm.scheduleCron))
+
+// ===== 最近 5 次执行时间预览（简单模拟） =====
+const nextExecutions = computed(() => {
+  if (editForm.triggerType !== 'SCHEDULED' || !editForm.scheduleCron) return []
+  const parts = editForm.scheduleCron.trim().split(/\s+/)
+  if (parts.length < 5) return []
+  try {
+    const [min, hour] = parts
+    const times: string[] = []
+    const now = new Date()
+    for (let i = 1; i <= 5; i++) {
+      const d = new Date(now)
+      d.setDate(d.getDate() + i)
+      d.setHours(parseInt(hour, 10), parseInt(min, 10), 0, 0)
+      times.push(d.toISOString().substring(0, 16).replace('T', ' '))
+    }
+    return times
+  } catch { return [] }
+})
 
 function handleDelete(record: any) {
   ElMessageBox.confirm(`确定删除计划「${record.name}」？`, '确认删除', { type: 'warning' })
@@ -399,12 +540,12 @@ onBeforeUnmount(() => {
 <template>
   <div>
     <PageHeader title="测试计划">
-      <el-dropdown v-if="hasPermission('project:plan:add')" @command="handleCreate">
+      <el-dropdown v-if="hasPermission('project:plan:add')" @command="openCreateModal">
         <el-button type="primary">+ 新建计划<el-icon style="margin-left:4px"><ArrowDown /></el-icon></el-button>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item command="AUTO">自动测试计划</el-dropdown-item>
-            <el-dropdown-item command="MANUAL">手动测试计划</el-dropdown-item>
+            <el-dropdown-item command="AUTO">自动</el-dropdown-item>
+            <el-dropdown-item command="MANUAL">手动</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -493,7 +634,7 @@ onBeforeUnmount(() => {
         <el-table v-loading="loading" :data="list" row-key="id" border stripe style="width:100%">
           <el-table-column prop="name" label="计划名称" min-width="160" show-overflow-tooltip>
             <template #default="{ row }">
-              <a style="font-weight:500;color:var(--color-primary);cursor:pointer" @click="handleEdit(row)">{{ row.name }}</a>
+              <a style="font-weight:500;color:var(--color-primary);cursor:pointer" @click="handleRelate(row)">{{ row.name }}</a>
             </template>
           </el-table-column>
           <el-table-column label="计划类型" width="120" align="center">
@@ -552,9 +693,10 @@ onBeforeUnmount(() => {
               <span v-else style="color:#c0c4cc">-</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="160" fixed="right" align="center">
+          <el-table-column label="操作" width="210" fixed="right" align="center">
             <template #default="{ row }">
-              <el-button v-if="hasPermission('project:plan:edit')" type="primary" link size="small" @click="handleEdit(row)">编辑</el-button>
+              <el-button v-if="hasPermission('project:plan:edit')" type="primary" link size="small" @click="openEditModal(row)">编辑</el-button>
+              <el-button v-if="hasPermission('project:plan:edit')" type="primary" link size="small" @click="handleRelate(row)">{{ row.planType === 'MANUAL' ? '关联用例' : '关联套件' }}</el-button>
               <el-button v-if="hasPermission('project:plan:run')" type="success" link size="small" @click="handleRun(row)">执行</el-button>
               <el-button v-if="hasPermission('project:plan:delete')" type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
             </template>
@@ -569,6 +711,117 @@ onBeforeUnmount(() => {
         />
       </div>
     </div>
+
+    <!-- 新建计划弹窗 -->
+    <el-dialog v-model="createModalVisible" title="新建计划" width="480px" :close-on-click-modal="false">
+      <el-form label-position="top">
+        <el-form-item label="计划类型" required>
+          <div class="plan-type-group">
+            <div v-for="t in planTypeOptions" :key="t.value"
+              class="plan-type-card"
+              :class="{ selected: createForm.planType === t.value }"
+              @click="createForm.planType = t.value">
+              <el-radio :model-value="createForm.planType" :label="t.value" @click.stop>{{ t.label }}</el-radio>
+            </div>
+          </div>
+        </el-form-item>
+        <el-form-item label="计划名称" required>
+          <el-input v-model="createForm.name" placeholder="请输入计划名称" maxlength="100" />
+        </el-form-item>
+        <el-form-item label="所属分组">
+          <el-select v-model="createForm.groupId" placeholder="未分组" clearable style="width:100%">
+            <el-option v-for="g in groups" :key="g.id" :value="g.id" :label="g.name" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input v-model="createForm.description" type="textarea" :rows="2" placeholder="可选，描述此计划的用途" maxlength="500" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="createModalVisible = false">取消</el-button>
+        <el-button type="primary" :loading="creating" @click="handleCreateSubmit">创建</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑计划弹窗：基础信息 + 执行策略（关联内容在独立页维护） -->
+    <el-dialog v-model="editModalVisible" :title="`编辑${editIsManual ? '手动' : '自动'}计划`" width="640px" :close-on-click-modal="false">
+      <el-form label-position="top">
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="计划名称" required>
+              <el-input v-model="editForm.name" placeholder="请输入计划名称" maxlength="100" />
+            </el-form-item>
+          </el-col>
+          <el-col v-if="!editIsManual" :span="12">
+            <el-form-item label="绑定环境">
+              <el-select v-model="editForm.environmentId" placeholder="选择执行环境" clearable style="width:100%">
+                <el-option v-for="env in environments" :key="env.id" :value="env.id"
+                  :label="`${env.name}${env.isCurrent === 1 ? '（当前）' : ''}`" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="所属分组">
+              <el-select v-model="editForm.groupId" placeholder="未分组" clearable style="width:100%">
+                <el-option v-for="g in groups" :key="g.id" :value="g.id" :label="g.name" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-form-item label="描述">
+          <el-input v-model="editForm.description" type="textarea" :rows="2" placeholder="可选，描述此计划的用途" maxlength="500" />
+        </el-form-item>
+      </el-form>
+
+      <!-- 执行策略（仅自动测试计划） -->
+      <template v-if="!editIsManual">
+        <el-divider content-position="left">执行策略</el-divider>
+        <div class="trigger-group">
+          <div class="trigger-card" :class="{ selected: editForm.triggerType === 'MANUAL' }"
+            @click="editForm.triggerType = 'MANUAL'">
+            <el-radio :model-value="editForm.triggerType" label="MANUAL" @click.stop>手动触发</el-radio>
+          </div>
+          <div class="trigger-card" :class="{ selected: editForm.triggerType === 'SCHEDULED' }"
+            @click="editForm.triggerType = 'SCHEDULED'">
+            <el-radio :model-value="editForm.triggerType" label="SCHEDULED" @click.stop>定时执行</el-radio>
+          </div>
+          <div class="trigger-card" :class="{ selected: editForm.triggerType === 'CI' }"
+            @click="editForm.triggerType = 'CI'">
+            <el-radio :model-value="editForm.triggerType" label="CI" @click.stop>CI 触发</el-radio>
+          </div>
+        </div>
+
+        <div v-if="editForm.triggerType === 'SCHEDULED'" class="cron-config-area">
+          <el-form label-position="top">
+            <el-form-item label="Cron 表达式">
+              <div style="display:flex;gap:8px;align-items:center">
+                <el-input v-model="editForm.scheduleCron" placeholder="如 0 8 * * *" style="width:200px;font-family:monospace" />
+                <span v-if="cronReadable" style="font-size:12px;color:#909399">{{ cronReadable }}</span>
+              </div>
+            </el-form-item>
+            <el-form-item label="启停">
+              <el-switch v-model="editForm.isActive" :active-value="1" :inactive-value="0" />
+            </el-form-item>
+          </el-form>
+          <div v-if="nextExecutions.length > 0" class="cron-preview">
+            <b>最近 5 次执行时间预览：</b><br>
+            {{ nextExecutions.join(' · ') }}
+          </div>
+        </div>
+
+        <div v-if="editForm.triggerType === 'CI'" class="ci-config-area">
+          <div style="font-size:13px;color:#909399;line-height:1.8">
+            CI 触发模式下，计划将通过外部 CI/CD 系统（如 Jenkins、GitLab CI）的 API 调用来触发执行。<br>
+            请在 CI 系统中配置 Webhook 或 API 调用以触发此计划。
+          </div>
+        </div>
+      </template>
+
+      <template #footer>
+        <el-button @click="editModalVisible = false">取消</el-button>
+        <el-button type="primary" :loading="editing" @click="handleEditSubmit">保存</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 分组新建/编辑弹窗 -->
     <el-dialog v-model="groupModalVisible" :title="groupDialogTitle" width="420px" :close-on-click-modal="false">
@@ -700,6 +953,68 @@ onBeforeUnmount(() => {
 .plan-content {
   flex: 1;
   min-width: 0;
+}
+
+/* ===== 新建弹窗：计划类型卡片 ===== */
+.plan-type-group {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+.plan-type-card {
+  flex: 1;
+  padding: 8px 16px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all .15s;
+  text-align: center;
+}
+.plan-type-card:hover {
+  border-color: #409eff;
+}
+.plan-type-card.selected {
+  border-color: #409eff;
+  background: #ecf5ff;
+}
+
+/* ===== 编辑弹窗：触发方式卡片 ===== */
+.trigger-group {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.trigger-card {
+  padding: 8px 16px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.trigger-card:hover {
+  border-color: #409eff;
+}
+.trigger-card.selected {
+  border-color: #409eff;
+  background: #ecf5ff;
+}
+
+/* ===== 编辑弹窗：Cron 配置区 ===== */
+.cron-config-area {
+  padding: 16px;
+  background: #f5f7fa;
+  border-radius: 4px;
+}
+.cron-preview {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.8;
+}
+.ci-config-area {
+  padding: 16px;
+  background: #f5f7fa;
+  border-radius: 4px;
 }
 
 /* ===== 右键上下文菜单 ===== */

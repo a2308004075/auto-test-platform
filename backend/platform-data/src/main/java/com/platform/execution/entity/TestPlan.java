@@ -5,7 +5,6 @@
  */
 package com.platform.execution.entity;
 
-import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.platform.common.entity.BaseEntity;
 import lombok.Data;
@@ -62,7 +61,12 @@ public class TestPlan extends BaseEntity {
      */
     private String triggerType;
 
-    @TableLogic
+    /**
+     * 启用状态：1=启用 0=禁用（业务启停字段，非软删除标记）
+     *
+     * <p>注意：test_plan 不做软删除。删除计划为物理删除，执行记录与计划-用例关联行由外键级联清理；
+     * is_active 需与 (project_id, name) 唯一键语义一致地参与全部查询（含名称唯一性检查）。
+     */
     private Integer isActive;
 
     private Long createdBy;

@@ -26,9 +26,11 @@ import com.platform.execution.dto.ManualCaseUpdateRequest;
 import com.platform.execution.entity.DefectRelation;
 import com.platform.execution.entity.ManualCase;
 import com.platform.execution.entity.ManualCaseAttachment;
+import com.platform.execution.entity.TestPlanManualCase;
 import com.platform.execution.mapper.DefectRelationMapper;
 import com.platform.execution.mapper.ManualCaseAttachmentMapper;
 import com.platform.execution.mapper.ManualCaseMapper;
+import com.platform.execution.mapper.TestPlanManualCaseMapper;
 import com.platform.project.service.ProjectService;
 import com.platform.requirement.dto.RequirementCaseRelationCreateRequest;
 import com.platform.requirement.service.RequirementCaseRelationService;
@@ -77,6 +79,7 @@ public class ManualCaseService {
     private final DefectService defectService;
     private final CustomFieldValueService customFieldValueService;
     private final CustomFieldMapper customFieldMapper;
+    private final TestPlanManualCaseMapper testPlanManualCaseMapper;
     private final UserMapper userMapper;
 
     /**
@@ -430,6 +433,15 @@ public class ManualCaseService {
         deleteAttachments(caseId);
         // 自定义字段值级联清理
         customFieldValueService.deleteByEntity("manual_case", caseId);
+        // 计划-用例关联行上的关联级动态字段值级联清理
+        //（关联行本身由外键随用例/计划级联删除，sys_custom_field_value 无外键需显式清理）
+        LambdaQueryWrapper<TestPlanManualCase> relWrapper = new LambdaQueryWrapper<>();
+        relWrapper.eq(TestPlanManualCase::getManualCaseId, caseId)
+                .select(TestPlanManualCase::getId);
+        List<Long> relationIds = testPlanManualCaseMapper.selectList(relWrapper).stream()
+                .map(TestPlanManualCase::getId)
+                .collect(Collectors.toList());
+        customFieldValueService.deleteByEntities("plan_case", relationIds);
     }
 
     /**

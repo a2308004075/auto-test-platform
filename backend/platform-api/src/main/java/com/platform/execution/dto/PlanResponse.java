@@ -92,4 +92,14 @@ public class PlanResponse {
      * 关联的手动化用例数量
      */
     private Integer manualCaseCount;
+
+    /**
+     * 关联的手动化用例明细列表（详情页关联用例表格展示用）
+     */
+    private List<ManualCaseBriefDTO> manualCaseDetails;
+
+    /**
+     * 关联的自动化套件明细列表（详情页关联套件表格展示用）
+     */
+    private List<AutoSuiteBriefDTO> autoSuiteDetails;
 }
