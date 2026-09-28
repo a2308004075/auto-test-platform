@@ -102,6 +102,12 @@ public class CustomFieldService {
             "[{\"label\":\"新建\",\"value\":\"NEW\"},{\"label\":\"待确认\",\"value\":\"TO_CONFIRM\"},{\"label\":\"修复中\",\"value\":\"FIXING\"},{\"label\":\"待部署\",\"value\":\"TO_DEPLOY\"},{\"label\":\"待验证\",\"value\":\"PENDING\"},{\"label\":\"已修复\",\"value\":\"COMPLETED\"},{\"label\":\"重新打开\",\"value\":\"REOPENED\"},{\"label\":\"延期修复\",\"value\":\"DEFERRED\"},{\"label\":\"无需修复\",\"value\":\"CLOSED\"}]";
 
     /**
+     * 缺陷"状态"字段预置默认值（与预置选项"新建"的 value 一致）：
+     * 【页面配置-字段设置】编辑弹窗中只读展示"默认值=新建"；新建缺陷仍由创建逻辑固定为 NEW，不受此配置影响
+     */
+    private static final String DEFAULT_DEFECT_STATUS_VALUE = "NEW";
+
+    /**
      * 新建项目时预置的执行结果选项（value 与 test_result.round_results 现有英文编码一致，存量数据无需迁移）
      */
     private static final String DEFAULT_EXECUTION_RESULT_OPTIONS_JSON =
@@ -222,7 +228,7 @@ public class CustomFieldService {
     public void createDefaultStatusField(Long projectId) {
         createStatusField(projectId, "defect", DEFECT_STATUS_FIELD_KEY,
                 "缺陷流转状态下拉框的枚举选项：可增删选项、修改显示名、调整顺序；删除选项后存量缺陷保留原状态值",
-                DEFAULT_DEFECT_STATUS_OPTIONS_JSON);
+                DEFAULT_DEFECT_STATUS_OPTIONS_JSON, DEFAULT_DEFECT_STATUS_VALUE);
     }
 
     /**
@@ -236,7 +242,7 @@ public class CustomFieldService {
     public void createDefaultExecutionResultField(Long projectId) {
         createStatusField(projectId, EXECUTION_MODULE, EXECUTION_RESULT_FIELD_KEY,
                 "手动计划执行页结果标记下拉框的枚举选项：可增删选项、修改显示名、调整顺序；删除选项后已记录的结果保留原值",
-                DEFAULT_EXECUTION_RESULT_OPTIONS_JSON);
+                DEFAULT_EXECUTION_RESULT_OPTIONS_JSON, null);
     }
 
     /**
@@ -282,10 +288,11 @@ public class CustomFieldService {
     /**
      * 预置模块"状态"字段（统一存 edit 视图）
      *
-     * <p>状态字段系统预置为必填、显示位置固定为"详情"，且固定排第一位（列表展示与拖拽均锁定位置）
+     * <p>状态字段系统预置为必填、显示位置固定为"详情"，且固定排第一位（列表展示与拖拽均锁定位置）；
+     * defaultValue 仅缺陷"状态"字段预置"新建"（NEW）用于弹窗只读展示，执行结果字段传 null
      */
     private void createStatusField(Long projectId, String module, String fieldKey,
-                                   String description, String optionsJson) {
+                                   String description, String optionsJson, String defaultValue) {
         CustomField field = new CustomField();
         field.setProjectId(projectId);
         field.setModule(module);
@@ -295,6 +302,7 @@ public class CustomFieldService {
         field.setDescription(description);
         field.setFieldType("select");
         field.setOptionsJson(optionsJson);
+        field.setDefaultValue(defaultValue);
         field.setIsRequired(1);
         field.setDisplayScope(STATUS_DISPLAY_SCOPE);
         field.setSortNo(1);

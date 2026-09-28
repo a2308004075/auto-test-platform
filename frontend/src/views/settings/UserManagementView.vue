@@ -435,7 +435,7 @@ onMounted(() => { fetchUsers(); fetchRoles() })
             </template>
           </el-table-column>
           <el-table-column prop="displayName" label="用户名" min-width="120" />
-          <el-table-column label="角色" width="100">
+          <el-table-column label="角色" width="120">
             <template #default="{ row }">
               <span class="um-role-tag" :class="getRoleTagClass(row.role)">{{ row.roleName || row.role }}</span>
             </template>

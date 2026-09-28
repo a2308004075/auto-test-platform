@@ -204,12 +204,21 @@ function handleFieldTypeChange() {
   loadDefaultSourceOptions()
 }
 
-// ===== 默认值配置（按字段类型渲染对应控件；系统关键字段隐藏——其值不走自定义字段） =====
+// ===== 默认值配置（按字段类型渲染对应控件；缺陷"状态"字段只读展示预置"新建"；执行结果字段不提供） =====
 const isDatetimeType = computed(() => form.fieldType === 'datetime')
 const isUserType = computed(() => form.fieldType === 'user')
 const isEnvType = computed(() => form.fieldType === 'environment')
-/** 系统关键字段（状态/执行结果）的值不走 sys_custom_field_value，默认值无消费场景，不提供配置 */
-const showDefaultValue = computed(() => !isStatusField.value)
+/** 缺陷"状态"系统字段的预置默认值（与选项"新建"的 value 一致，与后端 DEFAULT_DEFECT_STATUS_VALUE 同源） */
+const DEFECT_STATUS_DEFAULT_VALUE = 'NEW'
+/** 缺陷"状态"系统字段（module=defect）：默认值系统预置"新建"，弹窗只读展示、不可修改 */
+const isDefectStatusField = computed(() => isStatusField.value && selectedModule.value === 'defect')
+/**
+ * 默认值配置展示规则：普通字段可编辑；
+ * 缺陷"状态"字段只读展示（预置"新建"）；执行结果字段不提供（其值不走自定义字段，无消费场景）
+ */
+const showDefaultValue = computed(() => !isStatusField.value || isDefectStatusField.value)
+/** 默认值只读（缺陷"状态"字段）：控件置灰，提交时强制保持预置值带回 */
+const isDefaultValueReadonly = computed(() => isDefectStatusField.value)
 // datetime"新建时取当前时间"勾选（存储 NOW 哨兵，新建表单初始化时翻译为当前时刻）
 const defaultNow = ref(false)
 // 用户/环境默认值下拉选项（对齐后端 fillOptions 的选项来源与 value 口径）
@@ -437,6 +446,10 @@ async function handleSubmit() {
         (o) => o.value === form.defaultValue || o.label === form.defaultValue,
       )
       form.defaultValue = hit ? hit.value : ''
+    }
+    // 缺陷"状态"字段：默认值系统预置"新建"（弹窗只读展示），不随选项增删/翻译变化，强制保持预置值提交
+    if (isDefectStatusField.value) {
+      form.defaultValue = DEFECT_STATUS_DEFAULT_VALUE
     }
   } else {
     form.optionsJson = ''
@@ -837,7 +850,7 @@ async function handleDelete(row: any) {
             <el-button type="primary" link @click="addOptionRow">+ 添加选项</el-button>
           </el-form-item>
 
-          <!-- 默认值（可选，按字段类型渲染对应控件，新建表单初始化时自动填入；系统关键字段不提供） -->
+          <!-- 默认值（可选，按字段类型渲染对应控件，新建表单初始化时自动填入；缺陷"状态"字段只读展示系统预置"新建"；执行结果字段不提供） -->
           <el-form-item v-if="showDefaultValue" label="默认值" class="span-2">
             <div class="default-value-row">
               <el-input
@@ -859,7 +872,8 @@ async function handleDelete(row: any) {
               <el-select
                 v-else-if="isSelectType"
                 v-model="form.defaultValue"
-                placeholder="请选择默认值（可选）"
+                :placeholder="isDefaultValueReadonly ? '系统预置：新建' : '请选择默认值（可选）'"
+                :disabled="isDefaultValueReadonly"
                 clearable
                 filterable
                 style="flex: 1"
