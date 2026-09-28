@@ -184,7 +184,7 @@ onMounted(() => { loadEnvironments(); fetchList() })
 
     <!-- 执行记录表格 -->
     <el-table v-loading="loading" :data="list" row-key="id" border style="width:100%">
-      <el-table-column label="测试计划" width="180">
+      <el-table-column label="测试计划" min-width="180">
         <template #default="{ row }">
           <el-link type="primary" :underline="false" @click="viewDetail(row)">
             {{ row.planName || '-' }} #{{ row.id }}
