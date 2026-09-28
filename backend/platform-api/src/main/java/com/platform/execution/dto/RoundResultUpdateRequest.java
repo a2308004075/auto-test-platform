@@ -8,6 +8,7 @@ package com.platform.execution.dto;
 import lombok.Data;
 
 import javax.validation.constraints.NotNull;
+import javax.validation.constraints.Size;
 
 /**
  * 多轮测试结果单元格更新请求
@@ -36,7 +37,8 @@ public class RoundResultUpdateRequest {
     private String status;
 
     /**
-     * 文本备注（可空）
+     * 文本备注（可空，最多 200 字符）
      */
+    @Size(max = 200, message = "备注不能超过 200 个字符")
     private String remark;
 }

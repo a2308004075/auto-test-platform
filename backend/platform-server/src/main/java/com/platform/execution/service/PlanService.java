@@ -20,7 +20,6 @@ import com.platform.execution.dto.PlanCreateRequest;
 import com.platform.execution.dto.PlanResponse;
 import com.platform.execution.dto.PlanUpdateRequest;
 import com.platform.execution.dto.ResultColumnCreateRequest;
-import com.platform.execution.dto.ResultColumnMoveRequest;
 import com.platform.execution.dto.ResultColumnRenameRequest;
 import com.platform.execution.dto.ResultColumnResponse;
 import com.platform.execution.entity.*;
@@ -353,38 +352,6 @@ public class PlanService {
         column.setColumnName(columnName);
         planResultColumnMapper.updateById(column);
         return toColumnResponse(column);
-    }
-
-    /**
-     * 上移/下移自定义结果列（与相邻列交换 sort_no；首列上移/末列下移时原样返回）
-     */
-    @Transactional(rollbackFor = Exception.class)
-    public List<ResultColumnResponse> moveResultColumn(Long columnId, ResultColumnMoveRequest request) {
-        PlanResultColumn column = findColumnById(columnId);
-        String direction = request.getDirection().toLowerCase();
-        if (!"up".equals(direction) && !"down".equals(direction)) {
-            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "无效的移动方向：" + request.getDirection());
-        }
-
-        List<PlanResultColumn> columns = listColumnsByPlan(column.getPlanId());
-        int index = -1;
-        for (int i = 0; i < columns.size(); i++) {
-            if (columns.get(i).getId().equals(columnId)) {
-                index = i;
-                break;
-            }
-        }
-        int targetIndex = "up".equals(direction) ? index - 1 : index + 1;
-        if (index >= 0 && targetIndex >= 0 && targetIndex < columns.size()) {
-            PlanResultColumn target = columns.get(targetIndex);
-            Integer currentSortNo = column.getSortNo() != null ? column.getSortNo() : 0;
-            Integer targetSortNo = target.getSortNo() != null ? target.getSortNo() : 0;
-            column.setSortNo(targetSortNo);
-            target.setSortNo(currentSortNo);
-            planResultColumnMapper.updateById(column);
-            planResultColumnMapper.updateById(target);
-        }
-        return listResultColumns(column.getPlanId());
     }
 
     /**

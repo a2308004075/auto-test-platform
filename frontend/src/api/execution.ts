@@ -66,11 +66,6 @@ export function renameResultColumn(columnId: number, data: { columnName: string 
   return request.post(`/v1/result-columns/${columnId}`, data)
 }
 
-/** 上移/下移结果列 */
-export function moveResultColumn(columnId: number, data: { direction: 'up' | 'down' }) {
-  return request.post(`/v1/result-columns/${columnId}/move`, data)
-}
-
 /** 删除结果列（进行中单的历史值保留不清理） */
 export function deleteResultColumn(columnId: number) {
   return request.post(`/v1/result-columns/${columnId}/delete`)

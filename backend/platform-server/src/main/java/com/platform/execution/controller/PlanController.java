@@ -11,7 +11,6 @@ import com.platform.execution.dto.PlanCreateRequest;
 import com.platform.execution.dto.PlanResponse;
 import com.platform.execution.dto.PlanUpdateRequest;
 import com.platform.execution.dto.ResultColumnCreateRequest;
-import com.platform.execution.dto.ResultColumnMoveRequest;
 import com.platform.execution.dto.ResultColumnRenameRequest;
 import com.platform.execution.dto.ResultColumnResponse;
 import com.platform.execution.service.PlanService;
@@ -115,15 +114,6 @@ public class PlanController {
     public ApiResponse<ResultColumnResponse> renameResultColumn(@PathVariable Long columnId,
                                                                 @Valid @RequestBody ResultColumnRenameRequest request) {
         return ApiResponse.ok(planService.renameResultColumn(columnId, request));
-    }
-
-    /**
-     * 上移/下移自定义结果列
-     */
-    @PostMapping("/api/v1/result-columns/{columnId}/move")
-    public ApiResponse<List<ResultColumnResponse>> moveResultColumn(@PathVariable Long columnId,
-                                                                    @Valid @RequestBody ResultColumnMoveRequest request) {
-        return ApiResponse.ok(planService.moveResultColumn(columnId, request));
     }
 
     /**
