@@ -36,6 +36,18 @@ knowledge:
     embedding-model: ${LLM_EMBEDDING_MODEL:text-embedding-v4}
     embedding-dimension: 1536
 
+# AI 提供商切换（对话生成路由）：当前启用项存数据库 global_settings(ai.provider)，
+# 前端【系统设置-AI 服务】页切换运行时生效，此处 provider 仅为数据库未设置时的兑底；
+# Qoder Cloud Agents 凭据由环境变量注入，仅后端持有（不入库、不回显）
+ai:
+  provider: bailian
+  qoder:
+    api-base-url: ${QODER_API_BASE_URL:https://api.qoder.com}
+    access-token: ${QODER_ACCESS_TOKEN:}
+    agent-id: ${QODER_AGENT_ID:}
+    environment-id: ${QODER_ENVIRONMENT_ID:}
+    timeout-seconds: 300
+
 # 日志级别与文件输出由 logback-spring.xml 统一管理
 
 # MyBatis-Plus 日志配置继承 application.yml，此处不再重复声明

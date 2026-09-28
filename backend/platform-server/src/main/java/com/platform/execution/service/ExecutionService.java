@@ -16,6 +16,7 @@ import com.platform.common.exception.ErrorCode;
 import com.platform.common.response.PageResponse;
 import com.platform.execution.dto.ExecutionResponse;
 import com.platform.execution.dto.ExecutionStartRequest;
+import com.platform.execution.dto.ManualCaseAttachmentResponse;
 import com.platform.execution.dto.ManualCaseResultUpdateRequest;
 import com.platform.execution.dto.ManualExecutionResponse;
 import com.platform.execution.dto.ManualExecutionRowResponse;
@@ -25,12 +26,14 @@ import com.platform.execution.dto.RoundResultUpdateRequest;
 import com.platform.execution.dto.TestResultResponse;
 import com.platform.execution.entity.AutoCase;
 import com.platform.execution.entity.ManualCase;
+import com.platform.execution.entity.ManualCaseAttachment;
 import com.platform.execution.entity.PlanResultColumn;
 import com.platform.execution.entity.TestExecution;
 import com.platform.execution.entity.TestPlan;
 import com.platform.execution.entity.TestPlanManualCase;
 import com.platform.execution.entity.TestResult;
 import com.platform.execution.mapper.AutoCaseMapper;
+import com.platform.execution.mapper.ManualCaseAttachmentMapper;
 import com.platform.execution.mapper.ManualCaseMapper;
 import com.platform.execution.mapper.PlanResultColumnMapper;
 import com.platform.execution.mapper.TestExecutionMapper;
@@ -41,6 +44,7 @@ import com.platform.execution.mq.ExecutionMessage;
 import com.platform.execution.mq.ExecutionProducer;
 import com.platform.environment.entity.Environment;
 import com.platform.environment.mapper.EnvironmentMapper;
+import com.platform.sys.service.CustomFieldValueService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
@@ -82,9 +86,11 @@ public class ExecutionService {
     private final TestResultMapper testResultMapper;
     private final AutoCaseMapper autoCaseMapper;
     private final ManualCaseMapper manualCaseMapper;
+    private final ManualCaseAttachmentMapper manualCaseAttachmentMapper;
     private final TestPlanManualCaseMapper testPlanManualCaseMapper;
     private final PlanResultColumnMapper planResultColumnMapper;
     private final EnvironmentMapper environmentMapper;
+    private final CustomFieldValueService customFieldValueService;
     private final ExecutionProducer executionProducer;
     private final ObjectMapper objectMapper;
 
@@ -478,32 +484,72 @@ public class ExecutionService {
         rowWrapper.eq(TestResult::getExecutionId, execution.getId())
                 .eq(TestResult::getCaseType, "MANUAL")
                 .orderByAsc(TestResult::getId);
+        List<TestResult> results = testResultMapper.selectList(rowWrapper);
+        // 批量加载用例动态字段值（弹窗“用例信息”展示用，避免逐行 N+1 查询）
+        List<Long> caseIds = results.stream()
+                .map(TestResult::getManualCaseId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<Long, Map<String, String>> customFieldsMap = customFieldValueService.loadValuesBatch(
+                plan.getProjectId(), "manual_case", caseIds);
+        // 批量加载用例附件（弹窗“用例附件”展示用，避免逐行 N+1 查询）
+        Map<Long, List<ManualCaseAttachmentResponse>> attachmentsMap = loadAttachmentsMap(caseIds);
         List<ManualExecutionRowResponse> rows = new ArrayList<>();
-        for (TestResult result : testResultMapper.selectList(rowWrapper)) {
-            rows.add(toManualExecutionRow(result));
+        for (TestResult result : results) {
+            rows.add(toManualExecutionRow(result,
+                    customFieldsMap.getOrDefault(result.getManualCaseId(), Collections.emptyMap()),
+                    attachmentsMap.getOrDefault(result.getManualCaseId(), Collections.emptyList())));
         }
         resp.setRows(rows);
         return resp;
     }
 
     /**
-     * 组装执行工作台用例行（用例信息 + 多轮结果）
+     * 组装执行工作台用例行（用例信息 + 附件 + 多轮结果）
+     *
+     * @param customFields 用例动态字段值（fieldKey → value，弹窗“用例信息”展示用）
+     * @param attachments  用例附件列表（弹窗“用例附件”展示用）
      */
-    private ManualExecutionRowResponse toManualExecutionRow(TestResult result) {
+    private ManualExecutionRowResponse toManualExecutionRow(TestResult result, Map<String, String> customFields,
+                                                             List<ManualCaseAttachmentResponse> attachments) {
         ManualExecutionRowResponse row = new ManualExecutionRowResponse();
         row.setResultId(result.getId());
         row.setManualCaseId(result.getManualCaseId());
         row.setRoundResults(parseRoundResults(result.getRoundResults()));
+        row.setCustomFields(customFields);
+        row.setAttachments(attachments);
 
         ManualCase manualCase = result.getManualCaseId() != null
                 ? manualCaseMapper.selectById(result.getManualCaseId()) : null;
         if (manualCase != null) {
             row.setTitle(manualCase.getTitle());
+            row.setContent(manualCase.getContent());
+            row.setGroupId(manualCase.getGroupId());
             row.setCaseType(manualCase.getCaseType());
             row.setPriority(manualCase.getPriority());
             row.setCaseStatus(manualCase.getCaseStatus());
         }
         return row;
+    }
+
+    /**
+     * 批量加载用例附件并按 manualCaseId 分组（按上传时间倒序，与用例详情页附件列表排序一致）
+     */
+    private Map<Long, List<ManualCaseAttachmentResponse>> loadAttachmentsMap(List<Long> caseIds) {
+        if (caseIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        LambdaQueryWrapper<ManualCaseAttachment> wrapper = new LambdaQueryWrapper<>();
+        wrapper.in(ManualCaseAttachment::getManualCaseId, caseIds)
+                .orderByDesc(ManualCaseAttachment::getCreatedAt);
+        Map<Long, List<ManualCaseAttachmentResponse>> map = new HashMap<>();
+        for (ManualCaseAttachment attachment : manualCaseAttachmentMapper.selectList(wrapper)) {
+            ManualCaseAttachmentResponse resp = new ManualCaseAttachmentResponse();
+            BeanUtils.copyProperties(attachment, resp);
+            map.computeIfAbsent(attachment.getManualCaseId(), k -> new ArrayList<>()).add(resp);
+        }
+        return map;
     }
 
     /**

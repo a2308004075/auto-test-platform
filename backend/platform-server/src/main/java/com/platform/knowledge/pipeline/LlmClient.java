@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.platform.ai.client.QoderCloudClient;
+import com.platform.ai.service.AiProviderService;
 import com.platform.common.exception.BusinessException;
 import com.platform.common.exception.ErrorCode;
 import com.platform.knowledge.config.KnowledgeConfig;
@@ -28,6 +30,9 @@ import java.util.concurrent.TimeUnit;
  * OpenAI 兼容 LLM 客户端
  *
  * <p>支持普通调用和 SSE 流式输出。通过 OkHttp 调用 /v1/chat/completions 接口。</p>
+ *
+ * <p>提供商路由：当前启用 Qoder Cloud Agents（global_settings 的 ai.provider 开关）
+ * 时委托 {@link QoderCloudClient}，否则走百炼 OpenAI 兼容模式；调用方无感知。</p>
  */
 @Slf4j
 @Service
@@ -38,10 +43,15 @@ public class LlmClient {
     private final KnowledgeConfig config;
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
+    private final AiProviderService aiProviderService;
+    private final QoderCloudClient qoderCloudClient;
 
-    public LlmClient(KnowledgeConfig config, ObjectMapper objectMapper) {
+    public LlmClient(KnowledgeConfig config, ObjectMapper objectMapper,
+                     AiProviderService aiProviderService, QoderCloudClient qoderCloudClient) {
         this.config = config;
         this.objectMapper = objectMapper;
+        this.aiProviderService = aiProviderService;
+        this.qoderCloudClient = qoderCloudClient;
         this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(config.getLlm().getTimeoutSeconds(), TimeUnit.SECONDS)
@@ -57,6 +67,10 @@ public class LlmClient {
      * @return 助手回复文本
      */
     public ChatResult chat(List<ChatMessage> messages, Double temperature) {
+        // 提供商路由：Qoder Cloud Agents 备选后端
+        if (aiProviderService.isQoderCurrent()) {
+            return qoderCloudClient.chat(messages, temperature);
+        }
         try {
             String json = buildRequestBody(messages, temperature, false);
             String url = config.getLlm().getBaseUrl() + "/chat/completions";
@@ -100,6 +114,10 @@ public class LlmClient {
      * @return 完整回复文本
      */
     public String chatStream(List<ChatMessage> messages, Double temperature, SseEmitter emitter) {
+        // 提供商路由：Qoder Cloud Agents 备选后端
+        if (aiProviderService.isQoderCurrent()) {
+            return qoderCloudClient.chatStream(messages, temperature, emitter);
+        }
         StringBuilder fullContent = new StringBuilder();
         try {
             String json = buildRequestBody(messages, temperature, true);

@@ -7,6 +7,7 @@ package com.platform.execution.controller;
 
 import com.platform.common.response.ApiResponse;
 import com.platform.common.response.PageResponse;
+import com.platform.execution.dto.PlanCopyRequest;
 import com.platform.execution.dto.PlanCreateRequest;
 import com.platform.execution.dto.PlanResponse;
 import com.platform.execution.dto.PlanUpdateRequest;
@@ -77,6 +78,15 @@ public class PlanController {
     public ApiResponse<PlanResponse> update(@PathVariable Long planId,
                                             @Valid @RequestBody PlanUpdateRequest request) {
         return ApiResponse.ok(planService.updatePlan(planId, request));
+    }
+
+    /**
+     * 复制计划（基础信息与关联内容随源计划，名称/分组由请求指定；不复制执行记录与结果列）
+     */
+    @PostMapping("/api/v1/plans/{planId}/copy")
+    public ApiResponse<PlanResponse> copy(@PathVariable Long planId,
+                                          @Valid @RequestBody PlanCopyRequest request) {
+        return ApiResponse.ok(planService.copyPlan(planId, request));
     }
 
     /**

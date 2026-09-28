@@ -41,6 +41,13 @@ export function deletePlan(planId: number) {
   return request.post(`/v1/plans/${planId}/delete`)
 }
 
+/**
+ * 复制计划（基础信息与关联内容随源计划，名称/分组由请求指定；不复制执行记录与结果列）
+ */
+export function copyPlan(planId: number, data: { name: string; groupId?: number | null }) {
+  return request.post(`/v1/plans/${planId}/copy`, data)
+}
+
 // ===== 计划分组 API =====
 
 export function getPlanGroups(projectId: number) {

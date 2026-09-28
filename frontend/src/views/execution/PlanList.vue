@@ -13,7 +13,7 @@ import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown } from '@element-plus/icons-vue'
-import { getPlans, createPlan, updatePlan, deletePlan, getPlanGroups, createPlanGroup, updatePlanGroup, deletePlanGroup, clearGroupPlans, clearProjectPlans } from '@/api/plan'
+import { getPlans, createPlan, updatePlan, deletePlan, copyPlan, getPlanGroups, createPlanGroup, updatePlanGroup, deletePlanGroup, clearGroupPlans, clearProjectPlans } from '@/api/plan'
 import { startExecution } from '@/api/execution'
 import { getEnvironments } from '@/api/environment'
 import { useDict } from '@/composables/useDict'
@@ -359,6 +359,43 @@ async function handleCreateSubmit() {
   }
 }
 
+// ===== 复制计划弹窗（基础信息与关联内容随源计划复制，名称/分组可改；不复制执行记录与结果列） =====
+const copyModalVisible = ref(false)
+const copying = ref(false)
+const copyingPlan = ref<any>(null)
+const copyForm = reactive({
+  name: '',
+  groupId: null as number | null,
+})
+
+/** 打开复制弹窗：名称预填「源名-副本」（超长截断保住后缀），分组预填源分组 */
+function openCopyModal(record: any) {
+  copyingPlan.value = record
+  const suffix = '-副本'
+  const base = (record.name || '').slice(0, 100 - suffix.length)
+  Object.assign(copyForm, { name: base + suffix, groupId: record.groupId ?? null })
+  copyModalVisible.value = true
+}
+
+async function handleCopySubmit() {
+  if (!copyForm.name.trim()) {
+    ElMessage.warning('请输入计划名称')
+    return
+  }
+  copying.value = true
+  try {
+    await copyPlan(copyingPlan.value.id, { name: copyForm.name.trim(), groupId: copyForm.groupId })
+    ElMessage.success('复制成功')
+    copyModalVisible.value = false
+    fetchGroups()
+    fetchList()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '复制失败')
+  } finally {
+    copying.value = false
+  }
+}
+
 // ===== 操作 =====
 /** 跳转关联内容独立页（手动计划=手动化用例 / 自动计划=自动化套件） */
 function handleRelate(record: any) {
@@ -692,10 +729,11 @@ onBeforeUnmount(() => {
               <span v-else style="color:#c0c4cc">-</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="250" fixed="right" align="center">
+          <el-table-column label="操作" width="290" fixed="right" align="center">
             <template #default="{ row }">
               <el-button v-if="hasPermission('project:plan:edit')" type="primary" link size="small" @click="openEditModal(row)">编辑</el-button>
               <el-button v-if="hasPermission('project:plan:edit')" type="primary" link size="small" @click="handleRelate(row)">{{ row.planType === 'MANUAL' ? '添加测试用例' : '添加测试套件' }}</el-button>
+              <el-button v-if="hasPermission('project:plan:add')" type="primary" link size="small" @click="openCopyModal(row)">复制</el-button>
               <el-button v-if="hasPermission('project:plan:run')" type="success" link size="small" @click="handleRun(row)">执行</el-button>
               <el-button v-if="hasPermission('project:plan:delete')" type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
             </template>
@@ -739,6 +777,30 @@ onBeforeUnmount(() => {
       <template #footer>
         <el-button @click="createModalVisible = false">取消</el-button>
         <el-button type="primary" :loading="creating" @click="handleCreateSubmit">创建</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 复制计划弹窗：名称/分组可改，基础信息与关联内容随源计划复制 -->
+    <el-dialog v-model="copyModalVisible" title="复制计划" width="480px" :close-on-click-modal="false">
+      <el-form label-position="top">
+        <el-form-item label="源计划">
+          <el-input :model-value="copyingPlan?.name" disabled />
+        </el-form-item>
+        <el-form-item label="计划名称" required>
+          <el-input v-model="copyForm.name" placeholder="请输入计划名称" maxlength="100" />
+        </el-form-item>
+        <el-form-item label="所属分组">
+          <el-select v-model="copyForm.groupId" placeholder="未分组" clearable style="width:100%">
+            <el-option v-for="g in groups" :key="g.id" :value="g.id" :label="g.name" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <div style="font-size:12px;color:#909399;line-height:1.6">
+        将复制计划的基础信息与关联内容（{{ copyingPlan?.planType === 'MANUAL' ? '手动化用例' : '自动化套件' }}），不复制执行记录与结果列
+      </div>
+      <template #footer>
+        <el-button @click="copyModalVisible = false">取消</el-button>
+        <el-button type="primary" :loading="copying" @click="handleCopySubmit">复制</el-button>
       </template>
     </el-dialog>
 

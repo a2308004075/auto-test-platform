@@ -16,6 +16,7 @@ import com.platform.common.exception.ErrorCode;
 import com.platform.common.response.PageResponse;
 import com.platform.execution.dto.AutoSuiteBriefDTO;
 import com.platform.execution.dto.ManualCaseBriefDTO;
+import com.platform.execution.dto.PlanCopyRequest;
 import com.platform.execution.dto.PlanCreateRequest;
 import com.platform.execution.dto.PlanResponse;
 import com.platform.execution.dto.PlanUpdateRequest;
@@ -27,6 +28,7 @@ import com.platform.execution.mapper.*;
 import com.platform.environment.entity.Environment;
 import com.platform.environment.mapper.EnvironmentMapper;
 import com.platform.project.service.ProjectService;
+import com.platform.sys.service.CustomFieldValueService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
@@ -62,6 +64,7 @@ public class PlanService {
     private final ManualCaseMapper manualCaseMapper;
     private final TestPlanManualCaseMapper testPlanManualCaseMapper;
     private final PlanResultColumnMapper planResultColumnMapper;
+    private final CustomFieldValueService customFieldValueService;
     private final ObjectMapper objectMapper;
 
     /**
@@ -206,6 +209,75 @@ public class PlanService {
             applyManualCaseRelations(plan, request.getManualCaseIds());
         }
         return toResponse(plan);
+    }
+
+    /**
+     * 复制测试计划
+     *
+     * <p>基础信息（描述/类型/环境/触发策略/启停）与关联内容（手动用例/自动化套件）随源计划复制，
+     * 名称与所属分组由请求指定；执行记录与结果列定义不复制。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public PlanResponse copyPlan(Long planId, PlanCopyRequest request) {
+        TestPlan source = findById(planId);
+        projectService.findActiveById(source.getProjectId());
+
+        // 名称唯一性检查
+        LambdaQueryWrapper<TestPlan> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(TestPlan::getProjectId, source.getProjectId())
+                .eq(TestPlan::getName, request.getName());
+        if (testPlanMapper.selectCount(wrapper) > 0) {
+            throw new BusinessException(ErrorCode.PLAN_NOT_FOUND, "计划名称已存在：" + request.getName());
+        }
+
+        // 关联手动用例从关联表读取（权威数据源，保持计划内顺序）
+        List<Long> caseIds = listCaseRelations(planId).stream()
+                .map(TestPlanManualCase::getManualCaseId)
+                .collect(Collectors.toList());
+
+        TestPlan copy = new TestPlan();
+        copy.setProjectId(source.getProjectId());
+        copy.setName(request.getName());
+        copy.setDescription(source.getDescription());
+        copy.setPlanType(source.getPlanType());
+        copy.setGroupId(request.getGroupId());
+        copy.setAutoSuiteIds(source.getAutoSuiteIds());
+        copy.setManualCaseIds(serializeIdList(caseIds));
+        copy.setEnvironmentId(source.getEnvironmentId());
+        copy.setScheduleCron(source.getScheduleCron());
+        copy.setTriggerType(source.getTriggerType());
+        copy.setIsActive(source.getIsActive());
+        copy.setCreatedBy(getCurrentUserId());
+        testPlanMapper.insert(copy);
+        // 同步维护计划-用例关联表（权威数据源，新关联行按源顺序创建）
+        applyManualCaseRelations(copy, caseIds);
+        // 复制关联级动态字段值（module='plan_case'，挂载实体为关联行）
+        copyPlanCaseFieldValues(source, copy);
+        return toResponse(copy);
+    }
+
+    /**
+     * 复制计划-用例关联行的动态字段值（plan_case 模块）
+     *
+     * <p>源/新关联行均按计划内顺序排列，按下标一一对应；
+     * 当前项目若未配置 plan_case 字段则无值可复（安全 no-op）
+     */
+    private void copyPlanCaseFieldValues(TestPlan source, TestPlan copy) {
+        List<TestPlanManualCase> sourceRelations = listCaseRelations(source.getId());
+        if (sourceRelations.isEmpty()) {
+            return;
+        }
+        List<TestPlanManualCase> copyRelations = listCaseRelations(copy.getId());
+        Map<Long, Map<String, String>> valuesByRelation = customFieldValueService.loadValuesBatch(
+                source.getProjectId(), "plan_case",
+                sourceRelations.stream().map(TestPlanManualCase::getId).collect(Collectors.toList()));
+        for (int i = 0; i < copyRelations.size() && i < sourceRelations.size(); i++) {
+            Map<String, String> values = valuesByRelation.get(sourceRelations.get(i).getId());
+            if (values != null && !values.isEmpty()) {
+                customFieldValueService.saveValues(copy.getProjectId(), "plan_case", "edit",
+                        copyRelations.get(i).getId(), values);
+            }
+        }
     }
 
     /**

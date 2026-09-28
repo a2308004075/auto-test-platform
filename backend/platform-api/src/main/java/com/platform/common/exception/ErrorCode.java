@@ -28,6 +28,7 @@ package com.platform.common.exception;
  *   <li>2600-2699: M15 AI 渗透测试</li>
  *   <li>2700-2799: M16 知识库</li>
  *   <li>2800-2899: M17 AI 白盒测试</li>
+ *   <li>2900-2999: M18 AI 服务提供商</li>
  * </ul>
  *
  * <p>使用示例：
@@ -202,6 +203,11 @@ public final class ErrorCode {
     public static final int WHITEBOX_NO_CHANGES = 2805;
     public static final int WHITEBOX_LLM_GENERATE_FAILED = 2806;
     public static final int WHITEBOX_BUILD_FAILED = 2807;
+
+    // ===== M18 AI 服务提供商 (2900-2999) =====
+    public static final int AI_PROVIDER_CONFIG_INVALID = 2900;
+    public static final int AI_PROVIDER_CALL_FAILED = 2901;
+    public static final int AI_PROVIDER_SWITCH_FAILED = 2902;
 
     // ===== 业务错误码 → HTTP 状态码映射 =====
     private static final int[] UNAUTHORIZED_CODES = {UNAUTHORIZED, ACCESS_TOKEN_EXPIRED, REFRESH_TOKEN_EXPIRED};

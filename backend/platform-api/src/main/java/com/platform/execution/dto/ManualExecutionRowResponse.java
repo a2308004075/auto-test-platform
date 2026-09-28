@@ -7,13 +7,14 @@ package com.platform.execution.dto;
 
 import lombok.Data;
 
+import java.util.List;
 import java.util.Map;
 
 /**
  * 手动计划执行页的用例行响应
  *
  * <p>一行对应计划关联的一条手动化用例（及其预创建的 test_result 记录），
- * roundResults 为“结果列 ID → 单元格值”的多轮结果集合。
+ * 含标题/内容/动态字段值（弹窗“用例信息”展示）与多轮结果集合。
  */
 @Data
 public class ManualExecutionRowResponse {
@@ -47,6 +48,26 @@ public class ManualExecutionRowResponse {
      * 用例状态（1-使用，0-废弃）
      */
     private Integer caseStatus;
+
+    /**
+     * 用例内容（富文本：前置条件/操作步骤/预期结果）
+     */
+    private String content;
+
+    /**
+     * 所属分组 ID（null 表示未分组）
+     */
+    private Long groupId;
+
+    /**
+     * 动态字段值：fieldKey → value（与手动用例列表/详情同源，弹窗“用例信息”展示用）
+     */
+    private Map<String, String> customFields;
+
+    /**
+     * 用例附件列表（按上传时间倒序，弹窗“用例附件”展示用；createdByName 不填充）
+     */
+    private List<ManualCaseAttachmentResponse> attachments;
 
     /**
      * 多轮结果：结果列 ID → {status, remark}

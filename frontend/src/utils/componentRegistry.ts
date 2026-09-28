@@ -91,6 +91,9 @@ export const componentMap: Record<string, () => Promise<any>> = {
   'settings/GlobalConfigView': () => import('@/views/settings/GlobalConfigView.vue'),
   'settings/MenuManagementView': () => import('@/views/settings/MenuManagementView.vue'),
   'settings/CustomFieldView': () => import('@/views/settings/CustomFieldView.vue'),
+
+  // ===== AI 服务模块（提供商切换） =====
+  'settings/AiProviderView': () => import('@/views/settings/AiProviderView.vue'),
 }
 
 /**
