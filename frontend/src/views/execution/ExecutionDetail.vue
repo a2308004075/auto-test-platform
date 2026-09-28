@@ -12,6 +12,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Document } from '@element-plus/icons-vue'
 import { getExecution, getExecutionResults, cancelExecution, startExecution, updateManualCaseResult } from '@/api/execution'
 import { useExecutionWebSocket } from '@/composables/useExecutionWebSocket'
 import { useDict, type DictOption } from '@/composables/useDict'
@@ -80,6 +81,19 @@ const statusLabels: Record<string, string> = {
 
 // 手动计划：无自动执行过程，详情按“测试结果记录单”语义展示
 const isManualPlan = computed(() => execution.value?.planType === 'MANUAL')
+
+// 快照列：新模型手动执行记录在【执行完成】时快照列定义，脱离计划列定义稳定回放
+const snapshotColumns = computed<any[]>(() => execution.value?.resultColumns || [])
+const hasSnapshot = computed(() => isManualPlan.value && snapshotColumns.value.length > 0)
+
+// 多轮结果单元格展示（状态/备注）
+const cellStatusLabels: Record<string, string> = { PASSED: '通过', FAILED: '失败', SKIPPED: '跳过' }
+const cellStatusTypeMap: Record<string, string> = { PASSED: 'success', FAILED: 'danger', SKIPPED: 'info' }
+
+/** 读取结果行某快照列的单元格（无记录返回 null） */
+function cellOf(row: any, columnId: any) {
+  return row.roundResults?.[String(columnId)] || null
+}
 
 /** 执行状态文案：手动计划的 WAITING_MANUAL 显示“待记录结果” */
 function statusLabel(s?: string): string {
@@ -209,21 +223,21 @@ async function handleCancel() {
   }
 }
 
-async function handleReRun() {
+function handleReRun() {
   const planId = execution.value?.planId
   if (!planId) { ElMessage.warning('无关联计划，无法重新执行'); return }
-  const manual = isManualPlan.value
-  ElMessageBox.confirm(
-    manual ? '确定为该计划创建新的测试结果记录单？' : '确定重新执行此测试计划？',
-    manual ? '重新记录' : '重新执行',
-    { type: 'info' },
-  )
+  // 手动计划：跳转执行页（进行中执行单在执行页加载时获取或创建）
+  if (isManualPlan.value) {
+    router.push(`/project/${route.params.id}/plans/${planId}/execute`)
+    return
+  }
+  ElMessageBox.confirm('确定重新执行此测试计划？', '重新执行', { type: 'info' })
     .then(async () => {
       try {
         const res: any = await startExecution(planId)
-        ElMessage.success(manual ? '记录单已创建' : '执行已触发')
+        ElMessage.success('执行已触发')
         router.push(`/project/${route.params.id}/executions/${res.data.id}`)
-      } catch { ElMessage.error(manual ? '创建记录单失败' : '触发失败') }
+      } catch { ElMessage.error('触发失败') }
     })
     .catch(() => {})
 }
@@ -244,7 +258,7 @@ onMounted(loadData)
         {{ statusLabel(liveExecution.status) }}
       </el-tag>
       <el-tag v-if="connected" type="success" size="small" effect="dark">实时</el-tag>
-      <el-button type="primary" @click="handleReRun">{{ isManualPlan ? '重新记录' : '重新执行' }}</el-button>
+      <el-button type="primary" @click="handleReRun">{{ isManualPlan ? '去执行' : '重新执行' }}</el-button>
       <el-button @click="refresh">刷新</el-button>
       <el-button v-if="canCancel" type="danger" @click="handleCancel">{{ isManualPlan ? '作废记录单' : '取消执行' }}</el-button>
     </EditPageHeader>
@@ -273,8 +287,8 @@ onMounted(loadData)
       <span v-if="!isManualPlan">总耗时：<b>{{ formatDuration(liveExecution.durationMs) }}</b></span>
     </div>
 
-    <!-- 统计卡片 + 通过率环形图 -->
-    <div class="stats-grid">
+    <!-- 统计卡片 + 通过率环形图（手动快照记录无整单统计，隐藏） -->
+    <div v-if="!hasSnapshot" class="stats-grid">
       <el-card shadow="hover" class="stat-card">
         <div class="stat-label">总用例</div>
         <div class="stat-value">{{ caseStats.total }}</div>
@@ -305,12 +319,12 @@ onMounted(loadData)
       </div>
     </div>
 
-    <!-- 用例执行结果 -->
+    <!-- 用例执行结果 / 多轮测试结果（手动快照记录替换为多轮结果只读表格） -->
     <el-card style="margin-bottom:16px">
       <template #header>
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <span>用例执行结果</span>
-          <div style="display:flex;gap:4px">
+          <span>{{ hasSnapshot ? '多轮测试结果' : '用例执行结果' }}</span>
+          <div v-if="!hasSnapshot" style="display:flex;gap:4px">
             <el-button :type="caseFilter === 'all' ? 'primary' : 'default'"
               :plain="caseFilter !== 'all'" size="small" @click="caseFilter = 'all'">
               全部 ({{ results.length }})
@@ -326,7 +340,7 @@ onMounted(loadData)
           </div>
         </div>
       </template>
-      <el-table :data="filteredResults" row-key="id" :border="false" style="width:100%"
+      <el-table v-if="!hasSnapshot" :data="filteredResults" row-key="id" :border="false" style="width:100%"
         :row-class-name="({ row }: any) => (row.status === 'FAILED' || row.status === 'ERROR') ? 'fail-row' : ''">
         <el-table-column prop="caseName" label="用例名称" min-width="160" />
         <el-table-column label="用例类型" width="90">
@@ -367,6 +381,37 @@ onMounted(loadData)
               :style="{ color: (row.status === 'FAILED' || row.status === 'ERROR') ? '#f56c6c' : '#909399', fontSize: '12px' }">
               {{ row.errorSummary || row.actualResult || '-' }}
             </span>
+            <span v-else style="color:#c0c4cc">-</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <!-- 手动执行记录：多轮测试结果只读表格（列=【执行完成】时快照的结果列） -->
+      <el-table v-else :data="results" row-key="id" :border="false" style="width:100%">
+        <el-table-column prop="caseName" label="用例名称" min-width="160" show-overflow-tooltip />
+        <el-table-column label="用例类型" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.caseType === 'MANUAL' ? 'warning' : 'primary'" size="small">
+              {{ row.caseType === 'MANUAL' ? '手动化' : '自动化' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column v-for="col in snapshotColumns" :key="col.id" :min-width="150">
+          <template #header>
+            <span>{{ col.columnName }}</span>
+          </template>
+          <template #default="{ row }">
+            <template v-if="cellOf(row, col.id)">
+              <el-tag v-if="cellOf(row, col.id).status"
+                :type="(cellStatusTypeMap[cellOf(row, col.id).status] || 'info') as any" size="small">
+                {{ cellStatusLabels[cellOf(row, col.id).status] || cellOf(row, col.id).status }}
+              </el-tag>
+              <el-tooltip v-if="cellOf(row, col.id).remark" placement="top" :show-after="200">
+                <template #content>
+                  <div style="max-width:300px;word-break:break-all">{{ cellOf(row, col.id).remark }}</div>
+                </template>
+                <el-icon class="cell-remark-icon"><Document /></el-icon>
+              </el-tooltip>
+            </template>
             <span v-else style="color:#c0c4cc">-</span>
           </template>
         </el-table-column>
@@ -444,6 +489,13 @@ onMounted(loadData)
 
 :deep(.fail-row) {
   background-color: #fef0f0 !important;
+}
+
+.cell-remark-icon {
+  color: #909399;
+  cursor: pointer;
+  vertical-align: middle;
+  margin-left: 4px;
 }
 
 .log-container {

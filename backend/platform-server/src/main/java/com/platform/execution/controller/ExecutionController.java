@@ -10,6 +10,8 @@ import com.platform.common.response.PageResponse;
 import com.platform.execution.dto.ExecutionResponse;
 import com.platform.execution.dto.ExecutionStartRequest;
 import com.platform.execution.dto.ManualCaseResultUpdateRequest;
+import com.platform.execution.dto.ManualExecutionResponse;
+import com.platform.execution.dto.RoundResultUpdateRequest;
 import com.platform.execution.dto.TestResultResponse;
 import com.platform.execution.service.ExecutionService;
 import lombok.RequiredArgsConstructor;
@@ -89,5 +91,30 @@ public class ExecutionController {
     public ApiResponse<TestResultResponse> updateManualCaseResult(@PathVariable Long executionId,
                                                                    @Valid @RequestBody ManualCaseResultUpdateRequest request) {
         return ApiResponse.ok(executionService.updateManualCaseResult(executionId, request));
+    }
+
+    /**
+     * 获取或创建计划当前进行中的手动执行单（执行页加载）
+     */
+    @GetMapping("/api/v1/plans/{planId}/current-execution")
+    public ApiResponse<ManualExecutionResponse> getCurrentExecution(@PathVariable Long planId) {
+        return ApiResponse.ok(executionService.getCurrentManualExecution(planId));
+    }
+
+    /**
+     * 更新多轮结果单元格（执行页即时保存）
+     */
+    @PostMapping("/api/v1/executions/{executionId}/round-results")
+    public ApiResponse<TestResultResponse> updateRoundResult(@PathVariable Long executionId,
+                                                             @Valid @RequestBody RoundResultUpdateRequest request) {
+        return ApiResponse.ok(executionService.updateRoundResult(executionId, request));
+    }
+
+    /**
+     * 手动执行完成（快照列定义，形成测试记录）
+     */
+    @PostMapping("/api/v1/executions/{executionId}/complete")
+    public ApiResponse<ExecutionResponse> complete(@PathVariable Long executionId) {
+        return ApiResponse.ok(executionService.completeManualExecution(executionId));
     }
 }

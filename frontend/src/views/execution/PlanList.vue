@@ -481,19 +481,19 @@ function handleDelete(record: any) {
 }
 
 async function handleRun(record: any) {
-  const manual = record.planType === 'MANUAL'
-  ElMessageBox.confirm(
-    manual ? `确定为计划「${record.name}」创建测试结果记录单？` : `确定执行计划「${record.name}」？`,
-    manual ? '执行' : '触发执行',
-    { type: 'info' },
-  )
+  // 手动计划：点击执行仅跳转执行页（进行中执行单在执行页加载时获取或创建）
+  if (record.planType === 'MANUAL') {
+    router.push(`/project/${projectId.value}/plans/${record.id}/execute`)
+    return
+  }
+  ElMessageBox.confirm(`确定执行计划「${record.name}」？`, '触发执行', { type: 'info' })
     .then(async () => {
       try {
         const res: any = await startExecution(record.id)
-        ElMessage.success(manual ? '记录单已创建' : '执行已触发')
+        ElMessage.success('执行已触发')
         router.push(`/project/${projectId.value}/executions/${res.data.id}`)
       } catch (e: any) {
-        ElMessage.error(e?.response?.data?.message || (manual ? '创建记录单失败' : '触发失败'))
+        ElMessage.error(e?.response?.data?.message || '触发失败')
       }
     })
     .catch(() => {})
@@ -657,14 +657,6 @@ onBeforeUnmount(() => {
               <el-tag :type="(triggerTypeTagMap[row.triggerType] || '') as any" size="small">
                 {{ triggerTypeLabel(row.triggerType) }}
               </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="关联内容" min-width="180">
-            <template #default="{ row }">
-              <div style="display:flex;flex-direction:column;gap:3px;font-size:12px">
-                <span v-if="row.planType === 'AUTO'">自动化套件：{{ row.autoSuiteIds?.length || 0 }}</span>
-                <span v-if="row.planType === 'MANUAL'">手动化用例：{{ row.manualCaseCount ?? row.manualCaseIds?.length ?? 0 }}</span>
-              </div>
             </template>
           </el-table-column>
           <el-table-column label="用例数" width="100" align="center">

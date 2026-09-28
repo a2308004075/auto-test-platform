@@ -19,6 +19,10 @@ import com.platform.execution.dto.ManualCaseBriefDTO;
 import com.platform.execution.dto.PlanCreateRequest;
 import com.platform.execution.dto.PlanResponse;
 import com.platform.execution.dto.PlanUpdateRequest;
+import com.platform.execution.dto.ResultColumnCreateRequest;
+import com.platform.execution.dto.ResultColumnMoveRequest;
+import com.platform.execution.dto.ResultColumnRenameRequest;
+import com.platform.execution.dto.ResultColumnResponse;
 import com.platform.execution.entity.*;
 import com.platform.execution.mapper.*;
 import com.platform.environment.entity.Environment;
@@ -58,6 +62,7 @@ public class PlanService {
     private final AutoCaseMapper autoCaseMapper;
     private final ManualCaseMapper manualCaseMapper;
     private final TestPlanManualCaseMapper testPlanManualCaseMapper;
+    private final PlanResultColumnMapper planResultColumnMapper;
     private final ObjectMapper objectMapper;
 
     /**
@@ -300,6 +305,132 @@ public class PlanService {
      */
     private void deletePlansWithCaseFieldValues(LambdaQueryWrapper<TestPlan> wrapper) {
         testPlanMapper.delete(wrapper);
+    }
+
+    // ===== 计划级自定义测试结果列（手动计划执行页“多轮结果列”，历次执行共享） =====
+
+    /**
+     * 查询计划的自定义结果列（按 sortNo 升序）
+     */
+    public List<ResultColumnResponse> listResultColumns(Long planId) {
+        findById(planId);
+        return listColumnsByPlan(planId).stream()
+                .map(this::toColumnResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 添加自定义结果列（追加到末尾，列名计划内唯一）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ResultColumnResponse createResultColumn(Long planId, ResultColumnCreateRequest request) {
+        findById(planId);
+        String columnName = request.getColumnName().trim();
+        checkColumnNameUnique(planId, columnName, null);
+
+        int nextSortNo = listColumnsByPlan(planId).stream()
+                .mapToInt(c -> c.getSortNo() != null ? c.getSortNo() : 0)
+                .max()
+                .orElse(0);
+
+        PlanResultColumn column = new PlanResultColumn();
+        column.setPlanId(planId);
+        column.setColumnName(columnName);
+        column.setSortNo(nextSortNo + 1);
+        column.setCreatedBy(getCurrentUserId());
+        planResultColumnMapper.insert(column);
+        return toColumnResponse(column);
+    }
+
+    /**
+     * 重命名自定义结果列
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ResultColumnResponse renameResultColumn(Long columnId, ResultColumnRenameRequest request) {
+        PlanResultColumn column = findColumnById(columnId);
+        String columnName = request.getColumnName().trim();
+        checkColumnNameUnique(column.getPlanId(), columnName, columnId);
+        column.setColumnName(columnName);
+        planResultColumnMapper.updateById(column);
+        return toColumnResponse(column);
+    }
+
+    /**
+     * 上移/下移自定义结果列（与相邻列交换 sort_no；首列上移/末列下移时原样返回）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public List<ResultColumnResponse> moveResultColumn(Long columnId, ResultColumnMoveRequest request) {
+        PlanResultColumn column = findColumnById(columnId);
+        String direction = request.getDirection().toLowerCase();
+        if (!"up".equals(direction) && !"down".equals(direction)) {
+            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "无效的移动方向：" + request.getDirection());
+        }
+
+        List<PlanResultColumn> columns = listColumnsByPlan(column.getPlanId());
+        int index = -1;
+        for (int i = 0; i < columns.size(); i++) {
+            if (columns.get(i).getId().equals(columnId)) {
+                index = i;
+                break;
+            }
+        }
+        int targetIndex = "up".equals(direction) ? index - 1 : index + 1;
+        if (index >= 0 && targetIndex >= 0 && targetIndex < columns.size()) {
+            PlanResultColumn target = columns.get(targetIndex);
+            Integer currentSortNo = column.getSortNo() != null ? column.getSortNo() : 0;
+            Integer targetSortNo = target.getSortNo() != null ? target.getSortNo() : 0;
+            column.setSortNo(targetSortNo);
+            target.setSortNo(currentSortNo);
+            planResultColumnMapper.updateById(column);
+            planResultColumnMapper.updateById(target);
+        }
+        return listResultColumns(column.getPlanId());
+    }
+
+    /**
+     * 删除自定义结果列
+     *
+     * <p>仅删除列定义；进行中执行单已填写的该列单元格值保留为孤儿数据不清理，
+     * 归档快照只包含归档时刻存在的列定义。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteResultColumn(Long columnId) {
+        findColumnById(columnId);
+        planResultColumnMapper.deleteById(columnId);
+    }
+
+    private PlanResultColumn findColumnById(Long columnId) {
+        PlanResultColumn column = planResultColumnMapper.selectById(columnId);
+        if (column == null) {
+            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "结果列不存在：" + columnId);
+        }
+        return column;
+    }
+
+    private void checkColumnNameUnique(Long planId, String columnName, Long excludeColumnId) {
+        LambdaQueryWrapper<PlanResultColumn> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(PlanResultColumn::getPlanId, planId)
+                .eq(PlanResultColumn::getColumnName, columnName);
+        if (excludeColumnId != null) {
+            wrapper.ne(PlanResultColumn::getId, excludeColumnId);
+        }
+        if (planResultColumnMapper.selectCount(wrapper) > 0) {
+            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "列名称已存在：" + columnName);
+        }
+    }
+
+    private List<PlanResultColumn> listColumnsByPlan(Long planId) {
+        LambdaQueryWrapper<PlanResultColumn> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(PlanResultColumn::getPlanId, planId)
+                .orderByAsc(PlanResultColumn::getSortNo)
+                .orderByAsc(PlanResultColumn::getId);
+        return planResultColumnMapper.selectList(wrapper);
+    }
+
+    private ResultColumnResponse toColumnResponse(PlanResultColumn column) {
+        ResultColumnResponse resp = new ResultColumnResponse();
+        BeanUtils.copyProperties(column, resp);
+        return resp;
     }
 
     private TestPlan findById(Long planId) {

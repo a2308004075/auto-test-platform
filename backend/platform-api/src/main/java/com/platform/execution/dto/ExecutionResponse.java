@@ -8,6 +8,8 @@ package com.platform.execution.dto;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 测试执行记录响应
@@ -69,4 +71,11 @@ public class ExecutionResponse {
      * 执行进度百分比（0~100）
      */
     private Integer progressPercent;
+
+    /**
+     * 结果列定义快照（仅手动计划执行完成时写入，供测试记录详情页只读回放）
+     *
+     * <p>元素结构：{"id":1,"columnName":"第一次台架测试结果","sortNo":1}
+     */
+    private List<Map<String, Object>> resultColumns;
 }

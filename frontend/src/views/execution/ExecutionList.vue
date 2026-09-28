@@ -123,6 +123,11 @@ function handleCancel(record: any) {
 
 function handleReRun(record: any) {
   if (!record.planId) { ElMessage.warning('无关联计划，无法重新执行'); return }
+  // 手动计划：跳转执行页（进行中执行单在执行页加载时获取或创建）
+  if (record.planType === 'MANUAL') {
+    router.push(`/project/${projectId.value}/plans/${record.planId}/execute`)
+    return
+  }
   ElMessageBox.confirm(`确定重新执行「${record.planName}」？`, '重新执行', { type: 'info' })
     .then(async () => {
       try {
@@ -239,7 +244,8 @@ onMounted(() => { loadEnvironments(); fetchList() })
       </el-table-column>
       <el-table-column label="通过率" width="80">
         <template #default="{ row }">
-          <span v-if="row.passRate != null" :style="{
+          <span v-if="row.planType === 'MANUAL'" style="color:#c0c4cc">-</span>
+          <span v-else-if="row.passRate != null" :style="{
             fontWeight: 600, fontSize: '13px',
             color: row.passRate >= 90 ? '#67c23a' : row.passRate >= 60 ? '#e6a23c' : '#f56c6c'
           }">{{ row.passRate }}%</span>

@@ -42,6 +42,14 @@ public class TestExecution implements Serializable {
      */
     private String status;
 
+    /**
+     * 执行完成时的结果列定义快照（JSON：[{"id":1,"columnName":"第一次台架测试结果","sortNo":1}]）
+     *
+     * <p>仅手动计划在【执行完成】时写入，测试记录详情页据此脱离
+     * plan_result_column 稳定回放历次归档记录。
+     */
+    private String resultColumns;
+
     private Integer totalCases;
 
     private Integer passedCases;

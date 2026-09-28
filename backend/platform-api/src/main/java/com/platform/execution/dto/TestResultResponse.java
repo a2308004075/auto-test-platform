@@ -8,6 +8,7 @@ package com.platform.execution.dto;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 
 /**
  * 测试结果明细响应
@@ -54,4 +55,12 @@ public class TestResultResponse {
     private LocalDateTime startedAt;
 
     private LocalDateTime finishedAt;
+
+    /**
+     * 多轮测试结果：结果列 ID → {status, remark}
+     *
+     * <p>仅手动计划执行页填写的单元格数据；归档记录的列名
+     * 由执行单 resultColumns 快照提供。
+     */
+    private Map<String, RoundCell> roundResults;
 }

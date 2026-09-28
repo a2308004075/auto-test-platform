@@ -74,6 +74,14 @@ public class TestResult implements Serializable {
      */
     private Integer durationMs;
 
+    /**
+     * 多轮测试结果单元格值（JSON：{"<结果列ID>":{"status":"PASSED|FAILED|SKIPPED","remark":"备注"}}）
+     *
+     * <p>手动计划执行页的“用例行 × 自定义结果列”单元格数据；
+     * 列 ID 对应 plan_result_column.id，执行完成归档后随列定义快照稳定回放。
+     */
+    private String roundResults;
+
     private LocalDateTime startedAt;
 
     private LocalDateTime finishedAt;

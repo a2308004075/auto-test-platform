@@ -147,6 +147,7 @@ export function addSupplementaryRoutes(router: Router, layoutName: string): void
 
     // ===== 测试计划/执行模块（新建改为列表页弹窗，详情统一视图 PlanDetail） =====
     { path: 'project/:id/plans/:planId',                   component: 'execution/PlanDetail',      title: '测试计划详情' },
+    { path: 'project/:id/plans/:planId/execute',           component: 'execution/PlanExecute',     title: '执行测试计划' },
     { path: 'project/:id/executions/:executionId',         component: 'execution/ExecutionDetail', title: '执行详情' },
 
     // ===== 需求文档模块 =====

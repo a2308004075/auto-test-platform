@@ -10,11 +10,16 @@ import com.platform.common.response.PageResponse;
 import com.platform.execution.dto.PlanCreateRequest;
 import com.platform.execution.dto.PlanResponse;
 import com.platform.execution.dto.PlanUpdateRequest;
+import com.platform.execution.dto.ResultColumnCreateRequest;
+import com.platform.execution.dto.ResultColumnMoveRequest;
+import com.platform.execution.dto.ResultColumnRenameRequest;
+import com.platform.execution.dto.ResultColumnResponse;
 import com.platform.execution.service.PlanService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
+import java.util.List;
 
 /**
  * 测试计划管理接口
@@ -81,6 +86,52 @@ public class PlanController {
     @PostMapping("/api/v1/plans/{planId}/delete")
     public ApiResponse<Void> delete(@PathVariable Long planId) {
         planService.deletePlan(planId);
+        return ApiResponse.ok();
+    }
+
+    // ===== 计划级自定义测试结果列（手动计划执行页“多轮结果列”，历次执行共享） =====
+
+    /**
+     * 查询计划的自定义结果列定义
+     */
+    @GetMapping("/api/v1/plans/{planId}/result-columns")
+    public ApiResponse<List<ResultColumnResponse>> listResultColumns(@PathVariable Long planId) {
+        return ApiResponse.ok(planService.listResultColumns(planId));
+    }
+
+    /**
+     * 添加自定义结果列（追加到末尾）
+     */
+    @PostMapping("/api/v1/plans/{planId}/result-columns")
+    public ApiResponse<ResultColumnResponse> createResultColumn(@PathVariable Long planId,
+                                                                @Valid @RequestBody ResultColumnCreateRequest request) {
+        return ApiResponse.ok(planService.createResultColumn(planId, request));
+    }
+
+    /**
+     * 重命名自定义结果列
+     */
+    @PostMapping("/api/v1/result-columns/{columnId}")
+    public ApiResponse<ResultColumnResponse> renameResultColumn(@PathVariable Long columnId,
+                                                                @Valid @RequestBody ResultColumnRenameRequest request) {
+        return ApiResponse.ok(planService.renameResultColumn(columnId, request));
+    }
+
+    /**
+     * 上移/下移自定义结果列
+     */
+    @PostMapping("/api/v1/result-columns/{columnId}/move")
+    public ApiResponse<List<ResultColumnResponse>> moveResultColumn(@PathVariable Long columnId,
+                                                                    @Valid @RequestBody ResultColumnMoveRequest request) {
+        return ApiResponse.ok(planService.moveResultColumn(columnId, request));
+    }
+
+    /**
+     * 删除自定义结果列
+     */
+    @PostMapping("/api/v1/result-columns/{columnId}/delete")
+    public ApiResponse<Void> deleteResultColumn(@PathVariable Long columnId) {
+        planService.deleteResultColumn(columnId);
         return ApiResponse.ok();
     }
 }
