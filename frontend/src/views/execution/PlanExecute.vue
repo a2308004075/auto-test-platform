@@ -30,6 +30,7 @@ import { createDefect, getDefectGroups } from '@/api/defect'
 import { getContentTemplates } from '@/api/contentTemplate'
 import { useExecutionResultOptions } from '@/composables/useExecutionResultOptions'
 import { isScopeVisible } from '@/utils/customFieldScope'
+import { applyFieldDefaults } from '@/utils/customFieldDefault'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
 import '@wangeditor/editor/dist/css/style.css'
 import EditPageHeader from '@/components/EditPageHeader/index.vue'
@@ -308,15 +309,9 @@ async function loadDefectMeta() {
   } catch { defectTemplateContent.value = '' }
 }
 
-/** 重置动态字段值为配置默认值（每次打开弹窗重新初始化，不残留上次输入） */
+/** 重置动态字段值为配置默认值（每次打开弹窗重新初始化，不残留上次输入；datetime 的 NOW 哨兵翻译为当前时刻） */
 function resetDefectFieldValues() {
-  const values: Record<string, any> = {}
-  for (const field of defectVisibleFields.value) {
-    if (field.defaultValue !== null && field.defaultValue !== undefined && field.defaultValue !== '') {
-      values[field.fieldKey] = field.defaultValue
-    }
-  }
-  defectFieldValues.value = values
+  defectFieldValues.value = applyFieldDefaults(defectVisibleFields.value, {})
 }
 
 // 附件（本页暂存随创建一次性提交，与缺陛建页一致）

@@ -24,6 +24,7 @@ import { getContentTemplates } from '@/api/contentTemplate'
 import PageHeader from '@/components/PageHeader/index.vue'
 import DynamicFieldGrid from '@/components/DynamicFieldGrid/index.vue'
 import { isScopeVisible } from '@/utils/customFieldScope'
+import { applyFieldDefaults } from '@/utils/customFieldDefault'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
 import '@wangeditor/editor/dist/css/style.css'
 
@@ -183,15 +184,9 @@ async function fetchCustomFields() {
       viewType: 'edit',
     })
     customFields.value = res.data || []
-    // 新建模式：初始化可见字段默认值（编辑模式由后端回填值）
+    // 新建模式：初始化可见字段默认值（datetime 的 NOW 哨兵翻译为当前时刻；编辑模式由后端回填值）
     if (isNew.value) {
-      for (const field of visibleCustomFields.value) {
-        if (field.defaultValue !== null && field.defaultValue !== undefined && field.defaultValue !== '') {
-          if (customFieldValues.value[field.fieldKey] === undefined) {
-            customFieldValues.value[field.fieldKey] = field.defaultValue
-          }
-        }
-      }
+      customFieldValues.value = applyFieldDefaults(visibleCustomFields.value, customFieldValues.value)
     }
   } catch {
     customFields.value = []

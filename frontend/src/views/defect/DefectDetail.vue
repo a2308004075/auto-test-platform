@@ -32,6 +32,7 @@ import { getContentTemplates } from '@/api/contentTemplate'
 import { useDict } from '@/composables/useDict'
 import { useDefectStatusOptions } from '@/composables/useDefectStatus'
 import { isScopeVisible } from '@/utils/customFieldScope'
+import { applyFieldDefaults } from '@/utils/customFieldDefault'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
 import '@wangeditor/editor/dist/css/style.css'
 
@@ -320,15 +321,9 @@ async function fetchEditFields() {
     statusRequired.value = fields.find((f: any) => f.fieldKey === 'defect_status')?.isRequired === 1
     // 状态字段（defect_status）仅作为流转下拉框的选项来源，不进字段信息区渲染（其值走 defect.status，不走自定义字段值）
     editFields.value = fields.filter((f: any) => f.fieldKey !== 'defect_status')
-    // 新建模式：初始化可见字段默认值（详情模式由后端回填值，无需默认值）
+    // 新建模式：初始化可见字段默认值（datetime 的 NOW 哨兵翻译为当前时刻；详情模式由后端回填值，无需默认值）
     if (isCreate.value) {
-      for (const field of visibleEditFields.value) {
-        if (field.defaultValue !== null && field.defaultValue !== undefined && field.defaultValue !== '') {
-          if (fieldValues.value[field.fieldKey] === undefined) {
-            fieldValues.value[field.fieldKey] = field.defaultValue
-          }
-        }
-      }
+      fieldValues.value = applyFieldDefaults(visibleEditFields.value, fieldValues.value)
     }
   } catch { editFields.value = [] }
 }

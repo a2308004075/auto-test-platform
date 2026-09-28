@@ -62,8 +62,9 @@ public class CustomFieldCreateRequest {
     private String optionsJson;
 
     /**
-     * 默认值
+     * 默认值（可选，与列宽 varchar(200) 对齐；datetime 类型支持 NOW 哨兵=新建表单初始化时取当前时刻，其余类型存字面值）
      */
+    @Size(max = 200, message = "默认值最多 200 字")
     private String defaultValue;
 
     /**

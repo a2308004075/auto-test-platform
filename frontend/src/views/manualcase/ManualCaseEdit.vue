@@ -33,6 +33,7 @@ import RequirementItemSelectDialog from '@/components/RequirementItemSelectDialo
 import DefectSelectDialog from '@/components/DefectSelectDialog/index.vue'
 import { getCustomFieldsForRender } from '@/api/customField'
 import { isScopeVisible } from '@/utils/customFieldScope'
+import { applyFieldDefaults } from '@/utils/customFieldDefault'
 import { getContentTemplates } from '@/api/contentTemplate'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
 import '@wangeditor/editor/dist/css/style.css'
@@ -205,15 +206,9 @@ async function fetchEditFields() {
     })
     const fields: any[] = res.data || []
     editFields.value = fields
-    // 新建模式：初始化可见字段默认值（详情模式由后端回填值，无需默认值）
+    // 新建模式：初始化可见字段默认值（datetime 的 NOW 哨兵翻译为当前时刻；详情模式由后端回填值，无需默认值）
     if (isCreate.value) {
-      for (const field of visibleEditFields.value) {
-        if (field.defaultValue !== null && field.defaultValue !== undefined && field.defaultValue !== '') {
-          if (fieldValues.value[field.fieldKey] === undefined) {
-            fieldValues.value[field.fieldKey] = field.defaultValue
-          }
-        }
-      }
+      fieldValues.value = applyFieldDefaults(visibleEditFields.value, fieldValues.value)
     }
   } catch { editFields.value = [] }
 }

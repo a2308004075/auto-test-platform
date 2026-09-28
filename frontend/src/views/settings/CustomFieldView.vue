@@ -17,6 +17,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { CaretRight, Lock, Rank } from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
 import { getCustomFields, createCustomField, updateCustomField, sortCustomFields, deleteCustomField } from '@/api/customField'
+import { getUsers } from '@/api/user'
+import { getEnvironments } from '@/api/environment'
+import { DATETIME_NOW_DEFAULT } from '@/utils/customFieldDefault'
 import { useProjectStore } from '@/stores'
 import { usePermission } from '@/composables/usePermission'
 import PageHeader from '@/components/PageHeader/index.vue'
@@ -154,8 +157,8 @@ const form = reactive({
   fieldType: 'text',
   description: '',
   optionsJson: '',
-  // 默认值 / 排序号已从弹窗表单移除（排序改由列表拖拽调整，后端更新接口会忽略请求中的排序值）：
-  // 仅保留属性用于编辑时回填原值随提交带回（排序值始终以库内值为准）
+  // 默认值随弹窗"默认值"表单项填写（按字段类型渲染对应控件；datetime 的"当前时间"存 NOW 哨兵）；
+  // 排序号已从弹窗移除（改由列表拖拽调整），仅保留属性用于编辑时回填原值随提交带回
   defaultValue: '',
   isRequired: 0,
   // "显示位置"为必填项：默认留空，需用户显式选择（前后端均校验非空）
@@ -190,11 +193,61 @@ const statusFieldLabel = computed(
   () => fieldList.value.find((f: any) => f.fieldKey === statusFieldKey.value)?.fieldLabel || '状态',
 )
 
-// 类型切换时清理互斥配置（枚举选项仅 select 用）
+// 类型切换时清理互斥配置（枚举选项仅 select 用；旧默认值与新类型语义不匹配，一并清空）
 function handleFieldTypeChange() {
   if (form.fieldType !== 'select') {
     optionRows.value = []
     form.optionsJson = ''
+  }
+  form.defaultValue = ''
+  defaultNow.value = false
+  loadDefaultSourceOptions()
+}
+
+// ===== 默认值配置（按字段类型渲染对应控件；系统关键字段隐藏——其值不走自定义字段） =====
+const isDatetimeType = computed(() => form.fieldType === 'datetime')
+const isUserType = computed(() => form.fieldType === 'user')
+const isEnvType = computed(() => form.fieldType === 'environment')
+/** 系统关键字段（状态/执行结果）的值不走 sys_custom_field_value，默认值无消费场景，不提供配置 */
+const showDefaultValue = computed(() => !isStatusField.value)
+// datetime"新建时取当前时间"勾选（存储 NOW 哨兵，新建表单初始化时翻译为当前时刻）
+const defaultNow = ref(false)
+// 用户/环境默认值下拉选项（对齐后端 fillOptions 的选项来源与 value 口径）
+const userOptions = ref<any[]>([])
+const envOptions = ref<any[]>([])
+
+/** 默认值下拉选项：select 取枚举选项行（缺值行以显示文本为中间值，提交时翻译为最终存储值）；user/environment 取动态加载列表 */
+const defaultValueSelectOptions = computed(() => {
+  if (isSelectType.value) {
+    return optionRows.value
+      .filter((r) => r.label.trim())
+      .map((r) => ({ label: r.label, value: r.value || r.label }))
+  }
+  if (isUserType.value) return userOptions.value
+  if (isEnvType.value) return envOptions.value
+  return []
+})
+
+/** 加载 user/environment 默认值的动态选项源（弹窗打开/类型切换时按需拉取） */
+async function loadDefaultSourceOptions() {
+  if (form.fieldType === 'user' && userOptions.value.length === 0) {
+    try {
+      const res: any = await getUsers({ page: 1, pageSize: 200 })
+      // 与后端 fillOptions 的用户选项一致：仅启用用户，排除 superAdmin
+      userOptions.value = (res.data?.items || [])
+        .filter((u: any) => u.isActive === 1 && u.username !== 'superAdmin')
+        .map((u: any) => ({ label: u.displayName || u.username, value: String(u.id) }))
+    } catch {
+      userOptions.value = []
+    }
+  }
+  if (form.fieldType === 'environment' && currentProjectId.value) {
+    try {
+      const res: any = await getEnvironments(currentProjectId.value)
+      envOptions.value = (res.data || []).map((e: any) => ({ label: e.name, value: String(e.id) }))
+    } catch {
+      envOptions.value = []
+    }
   }
 }
 
@@ -259,6 +312,7 @@ function resetForm() {
   form.description = ''
   form.optionsJson = ''
   form.defaultValue = ''
+  defaultNow.value = false
   form.isRequired = 0
   form.displayScope = []
   form.sortNo = 0
@@ -267,6 +321,7 @@ function resetForm() {
 
 function openCreate() {
   resetForm()
+  loadDefaultSourceOptions()
   dialogVisible.value = true
 }
 
@@ -278,7 +333,9 @@ function openEdit(row: any) {
   form.fieldType = row.fieldType
   form.description = row.description || ''
   form.optionsJson = row.optionsJson || ''
-  form.defaultValue = row.defaultValue || ''
+  // datetime 的 NOW 哨兵回填为"新建时取当前时间"勾选态（时间点输入不显示具体值）
+  defaultNow.value = row.fieldType === 'datetime' && row.defaultValue === DATETIME_NOW_DEFAULT
+  form.defaultValue = defaultNow.value ? '' : row.defaultValue || ''
   // "状态"字段系统预置为必填，不可修改（开关置灰并强制携带 1 提交）
   form.isRequired = isStatusField.value ? 1 : row.isRequired || 0
   // "状态"字段显示位置系统预置为"缺陷详情"，不可修改（下拉框置灰并强制携带）
@@ -303,6 +360,7 @@ function openEdit(row: any) {
     optionRows.value = []
   }
 
+  loadDefaultSourceOptions()
   dialogVisible.value = true
 }
 
@@ -373,9 +431,20 @@ async function handleSubmit() {
       validOptions = validRows.map((r) => ({ label: r.label, value: r.value || String(++maxNo) }))
     }
     form.optionsJson = JSON.stringify(validOptions)
+    // select 默认值翻译为最终存储值（选中缺值行时以保存时自动分配的值为准；未选/清空保持空）
+    if (form.defaultValue) {
+      const hit = validOptions.find(
+        (o) => o.value === form.defaultValue || o.label === form.defaultValue,
+      )
+      form.defaultValue = hit ? hit.value : ''
+    }
   } else {
     form.optionsJson = ''
   }
+
+  // datetime 勾选"新建时取当前时间"：存 NOW 哨兵（新建表单初始化时翻译为当前时刻）；
+  // 其余类型归一清空控件产生的 null（date-picker/select 清空时置 null，统一空串语义便于后端存储）
+  form.defaultValue = defaultNow.value ? DATETIME_NOW_DEFAULT : form.defaultValue ?? ''
 
   // 归属（项目/模块）由当前项目与左侧选中模块决定，不可在表单中修改；字段统一存 edit 视图
   const data = {
@@ -767,6 +836,77 @@ async function handleDelete(row: any) {
             </div>
             <el-button type="primary" link @click="addOptionRow">+ 添加选项</el-button>
           </el-form-item>
+
+          <!-- 默认值（可选，按字段类型渲染对应控件，新建表单初始化时自动填入；系统关键字段不提供） -->
+          <el-form-item v-if="showDefaultValue" label="默认值" class="span-2">
+            <div class="default-value-row">
+              <el-input
+                v-if="form.fieldType === 'text'"
+                v-model="form.defaultValue"
+                placeholder="请输入默认值（可选）"
+                maxlength="200"
+                style="flex: 1"
+              />
+              <el-input
+                v-else-if="form.fieldType === 'textarea'"
+                v-model="form.defaultValue"
+                type="textarea"
+                :rows="2"
+                placeholder="请输入默认值（可选）"
+                maxlength="200"
+                style="flex: 1"
+              />
+              <el-select
+                v-else-if="isSelectType"
+                v-model="form.defaultValue"
+                placeholder="请选择默认值（可选）"
+                clearable
+                filterable
+                style="flex: 1"
+              >
+                <el-option v-for="o in defaultValueSelectOptions" :key="o.value" :value="o.value" :label="o.label" />
+              </el-select>
+              <template v-else-if="isDatetimeType">
+                <el-date-picker
+                  v-model="form.defaultValue"
+                  type="datetime"
+                  placeholder="选择默认时间点（可选）"
+                  value-format="YYYY-MM-DD HH:mm"
+                  style="flex: 1"
+                  :disabled="defaultNow"
+                />
+                <el-checkbox v-model="defaultNow" label="新建时取当前时间" />
+              </template>
+              <el-input-number
+                v-else-if="form.fieldType === 'number'"
+                :model-value="form.defaultValue === '' || form.defaultValue === null || form.defaultValue === undefined ? null : Number(form.defaultValue)"
+                :controls="false"
+                placeholder="请输入默认值（可选）"
+                style="flex: 1"
+                @update:model-value="form.defaultValue = $event === null || $event === undefined ? '' : String($event)"
+              />
+              <el-select
+                v-else-if="isUserType"
+                v-model="form.defaultValue"
+                placeholder="请选择默认用户（可选）"
+                clearable
+                filterable
+                style="flex: 1"
+              >
+                <el-option v-for="o in defaultValueSelectOptions" :key="o.value" :value="o.value" :label="o.label" />
+              </el-select>
+              <el-select
+                v-else-if="isEnvType"
+                v-model="form.defaultValue"
+                placeholder="请选择默认环境（可选）"
+                clearable
+                filterable
+                style="flex: 1"
+              >
+                <el-option v-for="o in defaultValueSelectOptions" :key="o.value" :value="o.value" :label="o.label" />
+              </el-select>
+            </div>
+          </el-form-item>
         </div>
       </el-form>
       <template #footer>
@@ -934,6 +1074,14 @@ async function handleDelete(row: any) {
 }
 .cf-desc-empty {
   color: #c0c4cc;
+}
+
+/* 默认值控件行（datetime 时间点与"当前时间"勾选横排） */
+.default-value-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
 }
 
 .option-rows {
