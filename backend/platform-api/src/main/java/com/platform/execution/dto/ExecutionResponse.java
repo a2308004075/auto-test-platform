@@ -21,6 +21,11 @@ public class ExecutionResponse {
 
     private String planName;
 
+    /**
+     * 计划类型：MANUAL 手动计划（测试结果记录单）/ AUTO 自动计划
+     */
+    private String planType;
+
     private Long environmentId;
 
     private String environmentName;
@@ -31,7 +36,7 @@ public class ExecutionResponse {
     private String triggerType;
 
     /**
-     * 执行状态：PENDING / RUNNING / COMPLETED / FAILED / CANCELLED
+     * 执行状态：PENDING / RUNNING / WAITING_MANUAL / COMPLETED / FAILED / CANCELLED
      */
     private String status;
 

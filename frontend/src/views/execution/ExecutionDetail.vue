@@ -78,6 +78,15 @@ const statusLabels: Record<string, string> = {
   PASSED: '通过', SKIPPED: '跳过', ERROR: '错误',
 }
 
+// 手动计划：无自动执行过程，详情按“测试结果记录单”语义展示
+const isManualPlan = computed(() => execution.value?.planType === 'MANUAL')
+
+/** 执行状态文案：手动计划的 WAITING_MANUAL 显示“待记录结果” */
+function statusLabel(s?: string): string {
+  if (s === 'WAITING_MANUAL' && isManualPlan.value) return '待记录结果'
+  return statusLabels[s || ''] || s || ''
+}
+
 function getLabel(options: DictOption[], value: string): string {
   return options.find((o) => o.value === value)?.label || value
 }
@@ -193,30 +202,35 @@ async function handleManualResult(row: any, status: 'PASSED' | 'FAILED' | 'SKIPP
 async function handleCancel() {
   try {
     await cancelExecution(executionId.value)
-    ElMessage.success('已取消执行')
+    ElMessage.success(isManualPlan.value ? '记录单已作废' : '已取消执行')
     loadData()
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.message || '取消失败')
+    ElMessage.error(e?.response?.data?.message || (isManualPlan.value ? '作废失败' : '取消失败'))
   }
 }
 
 async function handleReRun() {
   const planId = execution.value?.planId
   if (!planId) { ElMessage.warning('无关联计划，无法重新执行'); return }
-  ElMessageBox.confirm('确定重新执行此测试计划？', '重新执行', { type: 'info' })
+  const manual = isManualPlan.value
+  ElMessageBox.confirm(
+    manual ? '确定为该计划创建新的测试结果记录单？' : '确定重新执行此测试计划？',
+    manual ? '重新记录' : '重新执行',
+    { type: 'info' },
+  )
     .then(async () => {
       try {
         const res: any = await startExecution(planId)
-        ElMessage.success('执行已触发')
+        ElMessage.success(manual ? '记录单已创建' : '执行已触发')
         router.push(`/project/${route.params.id}/executions/${res.data.id}`)
-      } catch { ElMessage.error('触发失败') }
+      } catch { ElMessage.error(manual ? '创建记录单失败' : '触发失败') }
     })
     .catch(() => {})
 }
 
 const canCancel = computed(() => {
   const s = liveExecution.value?.status
-  return s === 'RUNNING' || s === 'PENDING' || s === 'QUEUED'
+  return s === 'RUNNING' || s === 'PENDING' || s === 'QUEUED' || s === 'WAITING_MANUAL'
 })
 
 onMounted(loadData)
@@ -227,12 +241,12 @@ onMounted(loadData)
     <!-- 页头：计划名 + 状态 + 操作按钮 -->
     <EditPageHeader :title="detailTitle">
       <el-tag v-if="liveExecution.status" :type="(statusTypeMap[liveExecution.status] || 'info') as any">
-        {{ statusLabels[liveExecution.status] || liveExecution.status }}
+        {{ statusLabel(liveExecution.status) }}
       </el-tag>
       <el-tag v-if="connected" type="success" size="small" effect="dark">实时</el-tag>
-      <el-button type="primary" @click="handleReRun">重新执行</el-button>
+      <el-button type="primary" @click="handleReRun">{{ isManualPlan ? '重新记录' : '重新执行' }}</el-button>
       <el-button @click="refresh">刷新</el-button>
-      <el-button v-if="canCancel" type="danger" @click="handleCancel">取消执行</el-button>
+      <el-button v-if="canCancel" type="danger" @click="handleCancel">{{ isManualPlan ? '作废记录单' : '取消执行' }}</el-button>
     </EditPageHeader>
 
     <!-- 实时进度提示 -->
@@ -255,8 +269,8 @@ onMounted(loadData)
       <span>计划：<b>{{ execution.planName || '-' }}</b></span>
       <span>环境：<b>{{ execution.environmentName || '-' }}</b></span>
       <span>触发：<b>{{ getLabel(triggerOptions, execution.triggerType) }}</b></span>
-      <span>时间：<b>{{ execution.startedAt?.substring(0, 19).replace('T', ' ') || '-' }}</b></span>
-      <span>总耗时：<b>{{ formatDuration(liveExecution.durationMs) }}</b></span>
+      <span>时间：<b>{{ (execution.startedAt || execution.createdAt)?.substring(0, 19).replace('T', ' ') || '-' }}</b></span>
+      <span v-if="!isManualPlan">总耗时：<b>{{ formatDuration(liveExecution.durationMs) }}</b></span>
     </div>
 
     <!-- 统计卡片 + 通过率环形图 -->
@@ -325,7 +339,7 @@ onMounted(loadData)
         <el-table-column label="状态" width="80">
           <template #default="{ row }">
             <el-tag :type="(statusTypeMap[row.status] || 'info') as any" size="small">
-              {{ row.status === 'PENDING' && row.caseType === 'MANUAL' ? '待处理' : (statusLabels[row.status] || row.status) }}
+              {{ row.status === 'PENDING' && row.caseType === 'MANUAL' ? (isManualPlan ? '待记录' : '待处理') : (statusLabels[row.status] || row.status) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -342,7 +356,7 @@ onMounted(loadData)
             <span v-else style="color:#c0c4cc">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="耗时" width="80">
+        <el-table-column v-if="!isManualPlan" label="耗时" width="80">
           <template #default="{ row }">
             {{ row.durationMs ? `${(row.durationMs / 1000).toFixed(1)}s` : '-' }}
           </template>
@@ -359,8 +373,8 @@ onMounted(loadData)
       </el-table>
     </el-card>
 
-    <!-- 执行日志（内联卡片） -->
-    <el-card>
+    <!-- 执行日志（内联卡片，手动记录单无日志不展示） -->
+    <el-card v-if="!isManualPlan">
       <template #header>
         <div style="display:flex;justify-content:space-between;align-items:center">
           <span>执行日志</span>

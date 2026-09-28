@@ -103,11 +103,18 @@ function viewDetail(record: any) {
 }
 
 function handleCancel(record: any) {
-  ElMessageBox.confirm(`确定取消执行「${record.planName}」？`, '取消执行', { type: 'warning' })
+  const manualSheet = record.status === 'WAITING_MANUAL' && record.planType === 'MANUAL'
+  ElMessageBox.confirm(
+    manualSheet
+      ? `确定作废「${record.planName}」的测试结果记录单？已标记的结果将保留`
+      : `确定取消执行「${record.planName}」？`,
+    manualSheet ? '作废记录单' : '取消执行',
+    { type: 'warning' },
+  )
     .then(async () => {
       try {
         await cancelExecution(record.id)
-        ElMessage.success('已取消')
+        ElMessage.success(manualSheet ? '记录单已作废' : '已取消')
         fetchList()
       } catch { ElMessage.error('操作失败') }
     })
@@ -252,8 +259,8 @@ onMounted(() => { loadEnvironments(); fetchList() })
       <el-table-column label="操作" width="140" fixed="right">
         <template #default="{ row }">
           <el-button type="primary" link size="small" @click="viewDetail(row)">详情</el-button>
-          <el-button v-if="(row.status === 'RUNNING' || row.status === 'PENDING' || row.status === 'QUEUED') && hasPermission('project:execution:cancel')"
-            type="danger" link size="small" @click="handleCancel(row)">取消执行</el-button>
+          <el-button v-if="(row.status === 'RUNNING' || row.status === 'PENDING' || row.status === 'QUEUED' || row.status === 'WAITING_MANUAL') && hasPermission('project:execution:cancel')"
+            type="danger" link size="small" @click="handleCancel(row)">{{ row.status === 'WAITING_MANUAL' && row.planType === 'MANUAL' ? '作废记录单' : '取消执行' }}</el-button>
           <el-button v-if="row.status !== 'RUNNING' && row.status !== 'PENDING' && row.status !== 'QUEUED'"
             type="primary" link size="small" @click="handleReRun(row)">重新执行</el-button>
         </template>

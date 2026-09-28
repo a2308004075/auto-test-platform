@@ -481,13 +481,20 @@ function handleDelete(record: any) {
 }
 
 async function handleRun(record: any) {
-  ElMessageBox.confirm(`确定执行计划「${record.name}」？`, '触发执行', { type: 'info' })
+  const manual = record.planType === 'MANUAL'
+  ElMessageBox.confirm(
+    manual ? `确定为计划「${record.name}」创建测试结果记录单？` : `确定执行计划「${record.name}」？`,
+    manual ? '执行' : '触发执行',
+    { type: 'info' },
+  )
     .then(async () => {
       try {
         const res: any = await startExecution(record.id)
-        ElMessage.success('执行已触发')
+        ElMessage.success(manual ? '记录单已创建' : '执行已触发')
         router.push(`/project/${projectId.value}/executions/${res.data.id}`)
-      } catch { ElMessage.error('触发失败') }
+      } catch (e: any) {
+        ElMessage.error(e?.response?.data?.message || (manual ? '创建记录单失败' : '触发失败'))
+      }
     })
     .catch(() => {})
 }
@@ -693,10 +700,10 @@ onBeforeUnmount(() => {
               <span v-else style="color:#c0c4cc">-</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="210" fixed="right" align="center">
+          <el-table-column label="操作" width="250" fixed="right" align="center">
             <template #default="{ row }">
               <el-button v-if="hasPermission('project:plan:edit')" type="primary" link size="small" @click="openEditModal(row)">编辑</el-button>
-              <el-button v-if="hasPermission('project:plan:edit')" type="primary" link size="small" @click="handleRelate(row)">{{ row.planType === 'MANUAL' ? '关联用例' : '关联套件' }}</el-button>
+              <el-button v-if="hasPermission('project:plan:edit')" type="primary" link size="small" @click="handleRelate(row)">{{ row.planType === 'MANUAL' ? '添加测试用例' : '添加测试套件' }}</el-button>
               <el-button v-if="hasPermission('project:plan:run')" type="success" link size="small" @click="handleRun(row)">执行</el-button>
               <el-button v-if="hasPermission('project:plan:delete')" type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
             </template>

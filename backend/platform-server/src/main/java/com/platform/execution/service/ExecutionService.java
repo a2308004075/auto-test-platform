@@ -162,6 +162,8 @@ public class ExecutionService {
      *
      * <p>并发控制：当 RUNNING 状态的执行数已达上限时，
      * 新执行记录状态设为 QUEUED，等待前置任务完成后自动触发。
+     *
+     * <p>手动计划不走自动执行链路：直接创建“测试结果记录单”，由测试人员逐条记录用例是否通过。
      */
     @Transactional(rollbackFor = Exception.class)
     public ExecutionResponse startExecution(Long planId, ExecutionStartRequest request) {
@@ -184,6 +186,11 @@ public class ExecutionService {
         execution.setTriggeredBy(getCurrentUserId());
         execution.setCreatedAt(LocalDateTime.now());
 
+        // 手动计划：不占并发槽、不发 MQ，直接生成待记录状态的测试结果记录单
+        if ("MANUAL".equals(plan.getPlanType())) {
+            return createManualExecutionRecord(execution);
+        }
+
         // 并发控制：检查当前 RUNNING 数量
         int runningCount = countRunningExecutions();
         if (runningCount >= maxConcurrent) {
@@ -205,9 +212,59 @@ public class ExecutionService {
     }
 
     /**
+     * 创建手动计划的“测试结果记录单”。
+     *
+     * <p>手动计划没有可自动执行的内容，执行语义为记录计划中用例是否通过测试：
+     * 记录单创建即进入 WAITING_MANUAL 状态，每条关联手动化用例预创建一条 PENDING 结果，
+     * 由测试人员逐条标记 通过/失败/跳过，全部标记完成后自动置为 COMPLETED。
+     *
+     * <p>不走 MQ 与并发控制（无自动执行过程），不设置 startedAt（无“开始执行”时刻），
+     * 计划上若误挂了自动化套件则忽略，仅记录手动化用例。
+     */
+    private ExecutionResponse createManualExecutionRecord(TestExecution execution) {
+        // 读取计划关联的手动化用例（权威读源，按计划内顺序）
+        LambdaQueryWrapper<TestPlanManualCase> relWrapper = new LambdaQueryWrapper<>();
+        relWrapper.eq(TestPlanManualCase::getPlanId, execution.getPlanId())
+                .orderByAsc(TestPlanManualCase::getSortNo)
+                .orderByAsc(TestPlanManualCase::getId);
+        List<Long> manualCaseIds = new ArrayList<>();
+        for (TestPlanManualCase relation : testPlanManualCaseMapper.selectList(relWrapper)) {
+            if (manualCaseMapper.selectById(relation.getManualCaseId()) != null) {
+                manualCaseIds.add(relation.getManualCaseId());
+            }
+        }
+        if (manualCaseIds.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR,
+                    "请先为计划添加测试用例，再执行手动测试计划");
+        }
+
+        execution.setTotalCases(manualCaseIds.size());
+        execution.setStatus("WAITING_MANUAL");
+        testExecutionMapper.insert(execution);
+
+        // 预创建 PENDING 结果记录，等待测试人员标记
+        for (Long manualCaseId : manualCaseIds) {
+            TestResult testResult = new TestResult();
+            testResult.setExecutionId(execution.getId());
+            testResult.setManualCaseId(manualCaseId);
+            testResult.setCaseType("MANUAL");
+            testResult.setStatus("PENDING");
+            testResult.setStartedAt(LocalDateTime.now());
+            testResultMapper.insert(testResult);
+        }
+
+        log.info("创建手动测试记录单: planId={}, executionId={}, manualCases={}",
+                execution.getPlanId(), execution.getId(), manualCaseIds.size());
+        return toResponse(execution);
+    }
+
+    /**
      * 取消执行
      *
      * <p>如果取消的是 RUNNING 任务，触发下一个排队任务。
+     *
+     * <p>WAITING_MANUAL 状态的取消语义为作废：手动计划的测试结果记录单不再继续记录，
+     * 已标记的结果保留、未标记的保持 PENDING，记录冻结为 CANCELLED。
      */
     @Transactional(rollbackFor = Exception.class)
     public ExecutionResponse cancelExecution(Long executionId) {
@@ -218,9 +275,10 @@ public class ExecutionService {
 
         if (!"PENDING".equals(execution.getStatus())
                 && !"RUNNING".equals(execution.getStatus())
-                && !"QUEUED".equals(execution.getStatus())) {
+                && !"QUEUED".equals(execution.getStatus())
+                && !"WAITING_MANUAL".equals(execution.getStatus())) {
             throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR,
-                    "只能取消 PENDING、RUNNING 或 QUEUED 状态的执行");
+                    "只能取消 PENDING、RUNNING、QUEUED 或 WAITING_MANUAL 状态的执行");
         }
 
         boolean wasRunning = "RUNNING".equals(execution.getStatus());
@@ -326,10 +384,11 @@ public class ExecutionService {
         ExecutionResponse resp = new ExecutionResponse();
         BeanUtils.copyProperties(execution, resp);
 
-        // 获取计划名称
+        // 获取计划名称与类型
         TestPlan plan = testPlanMapper.selectById(execution.getPlanId());
         if (plan != null) {
             resp.setPlanName(plan.getName());
+            resp.setPlanType(plan.getPlanType());
         }
 
         // 获取环境名称
