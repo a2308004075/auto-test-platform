@@ -44,6 +44,7 @@ import com.platform.execution.mq.ExecutionMessage;
 import com.platform.execution.mq.ExecutionProducer;
 import com.platform.environment.entity.Environment;
 import com.platform.environment.mapper.EnvironmentMapper;
+import com.platform.sys.service.CustomFieldService;
 import com.platform.sys.service.CustomFieldValueService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -90,6 +91,7 @@ public class ExecutionService {
     private final TestPlanManualCaseMapper testPlanManualCaseMapper;
     private final PlanResultColumnMapper planResultColumnMapper;
     private final EnvironmentMapper environmentMapper;
+    private final CustomFieldService customFieldService;
     private final CustomFieldValueService customFieldValueService;
     private final ExecutionProducer executionProducer;
     private final ObjectMapper objectMapper;
@@ -384,9 +386,15 @@ public class ExecutionService {
             throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "结果列与执行单不属于同一计划");
         }
 
+        // 结果状态取值由【页面配置-用例执行】的"执行结果"字段配置驱动（无配置/解析失败回退 通过/失败/跳过）
         String status = StringUtils.hasText(request.getStatus()) ? request.getStatus().toUpperCase() : null;
-        if (status != null && !"PASSED".equals(status) && !"FAILED".equals(status) && !"SKIPPED".equals(status)) {
-            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "无效的结果状态：" + request.getStatus());
+        if (status != null) {
+            TestPlan plan = testPlanMapper.selectById(execution.getPlanId());
+            Long projectId = plan != null ? plan.getProjectId() : null;
+            List<String> allowedStatuses = customFieldService.listExecutionResultStatusValues(projectId);
+            if (allowedStatuses.stream().noneMatch(v -> v.equalsIgnoreCase(status))) {
+                throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "无效的结果状态：" + request.getStatus());
+            }
         }
         String remark = StringUtils.hasText(request.getRemark()) ? request.getRemark() : null;
 
@@ -528,7 +536,6 @@ public class ExecutionService {
             row.setGroupId(manualCase.getGroupId());
             row.setCaseType(manualCase.getCaseType());
             row.setPriority(manualCase.getPriority());
-            row.setCaseStatus(manualCase.getCaseStatus());
         }
         return row;
     }

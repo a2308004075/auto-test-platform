@@ -62,11 +62,6 @@ public class ManualCase extends BaseEntity {
     private Integer runInProdEnv;
 
     /**
-     * 用例状态（1-使用，0-废弃）
-     */
-    private Integer caseStatus;
-
-    /**
      * 创建人 ID
      */
     private Long createdBy;

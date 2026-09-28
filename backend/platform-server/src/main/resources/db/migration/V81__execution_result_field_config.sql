@@ -1,4 +1,13 @@
--- V81 开发库执行：预置 execution_result 字段（幂等）
+-- =====================================================================
+-- V81: 新增【用例执行】功能页 — 预置"执行结果"字段配置
+-- =====================================================================
+-- 用户需求：用例执行结果的枚举可在【页面配置】-【字段设置】中配置
+-- 与缺陷"状态"字段同模式：系统预置、固定排第一位、必填、不可删除；
+-- 结果值不走 sys_custom_field_value（存 test_result.round_results JSON），
+-- 配置仅作手动计划执行页结果标记下拉框与测试记录回放的选项来源。
+-- 选项 value 沿用现有英文编码（PASSED/FAILED/SKIPPED），存量数据无需迁移；
+-- 为全部存量项目幂等预置（同 field_key 已存在则跳过）。
+
 INSERT INTO `sys_custom_field`
   (`project_id`, `module`, `view_type`, `field_key`, `field_label`, `description`, `field_type`, `options_json`, `default_value`, `is_required`, `display_scope`, `sort_no`, `is_active`, `created_at`, `updated_at`)
 SELECT p.`id`, 'execution', 'edit', 'execution_result', '执行结果',
@@ -14,11 +23,3 @@ WHERE NOT EXISTS (
     AND cf.`view_type` = 'edit'
     AND cf.`field_key` = 'execution_result'
 );
-
--- flyway_schema_history 登记（checksum 由 dev 启动时 repair 对齐）
-INSERT INTO flyway_schema_history (installed_rank, version, description, type, script, checksum, installed_by, installed_on, execution_time, success)
-VALUES (80, '81', 'execution result field config', 'SQL', 'V81__execution_result_field_config.sql', NULL, 'root', NOW(), 0, 1);
-
--- 验证
-SELECT id, project_id, module, field_key, field_label, field_type, is_required, display_scope, sort_no, is_active, options_json FROM sys_custom_field WHERE module='execution';
-SELECT installed_rank, version, description, success FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 2;

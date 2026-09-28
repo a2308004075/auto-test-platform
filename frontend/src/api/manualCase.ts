@@ -8,7 +8,7 @@ import request from './request'
 // ===== 手动化用例 API =====
 
 export function getManualCases(projectId: number, params?: {
-  groupId?: number; keyword?: string; caseStatus?: string; customFilters?: string;
+  groupId?: number; keyword?: string; customFilters?: string;
   page?: number; pageSize?: number
 }) {
   return request.get(`/v1/projects/${projectId}/manual-cases`, { params })
@@ -28,12 +28,6 @@ export function updateManualCase(projectId: number, caseId: number, data: any) {
 
 export function deleteManualCase(projectId: number, caseId: number) {
   return request.post(`/v1/projects/${projectId}/manual-cases/${caseId}/delete`)
-}
-
-export function toggleManualCaseStatus(projectId: number, caseId: number, targetStatus?: number) {
-  return request.post(`/v1/projects/${projectId}/manual-cases/${caseId}/status`, null, {
-    params: targetStatus != null ? { targetStatus } : undefined,
-  })
 }
 
 // ===== 附件 API =====

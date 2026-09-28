@@ -49,11 +49,6 @@ public class ManualCaseResponse implements Serializable {
      */
     private Integer runInProdEnv;
 
-    /**
-     * 用例状态（1-使用，0-废弃），值仍走 manual_case.case_status 列
-     */
-    private Integer caseStatus;
-
     private Long createdBy;
     private String createdByName;
     private LocalDateTime createdAt;

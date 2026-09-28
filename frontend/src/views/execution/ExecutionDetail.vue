@@ -16,6 +16,7 @@ import { Document } from '@element-plus/icons-vue'
 import { getExecution, getExecutionResults, cancelExecution, startExecution, updateManualCaseResult } from '@/api/execution'
 import { useExecutionWebSocket } from '@/composables/useExecutionWebSocket'
 import { useDict, type DictOption } from '@/composables/useDict'
+import { useExecutionResultOptions } from '@/composables/useExecutionResultOptions'
 import EditPageHeader from '@/components/EditPageHeader/index.vue'
 
 const route = useRoute()
@@ -86,9 +87,16 @@ const isManualPlan = computed(() => execution.value?.planType === 'MANUAL')
 const snapshotColumns = computed<any[]>(() => execution.value?.resultColumns || [])
 const hasSnapshot = computed(() => isManualPlan.value && snapshotColumns.value.length > 0)
 
-// 多轮结果单元格展示（状态/备注）
-const cellStatusLabels: Record<string, string> = { PASSED: '通过', FAILED: '失败', SKIPPED: '跳过' }
+// 多轮结果单元格展示（状态/备注）：文案取自【页面配置-用例执行】的"执行结果"字段配置（按项目），
+// 无配置回退内置选项；配色仅覆盖预置三值，自定义编码回退 info
+const { options: cellStatusOptions } = useExecutionResultOptions(() => Number(route.params.id))
 const cellStatusTypeMap: Record<string, string> = { PASSED: 'success', FAILED: 'danger', SKIPPED: 'info' }
+
+/** 结果状态展示标签（配置驱动翻译，选项已删时回退显示原值） */
+function cellStatusLabel(status?: string): string {
+  if (!status) return ''
+  return cellStatusOptions.value.find((o: any) => String(o.value) === String(status))?.label || status
+}
 
 /** 读取结果行某快照列的单元格（无记录返回 null） */
 function cellOf(row: any, columnId: any) {
@@ -403,7 +411,7 @@ onMounted(loadData)
             <template v-if="cellOf(row, col.id)">
               <el-tag v-if="cellOf(row, col.id).status"
                 :type="(cellStatusTypeMap[cellOf(row, col.id).status] || 'info') as any" size="small">
-                {{ cellStatusLabels[cellOf(row, col.id).status] || cellOf(row, col.id).status }}
+                {{ cellStatusLabel(cellOf(row, col.id).status) }}
               </el-tag>
               <el-tooltip v-if="cellOf(row, col.id).remark" placement="top" :show-after="200">
                 <template #content>

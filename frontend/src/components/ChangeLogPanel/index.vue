@@ -35,7 +35,6 @@ const effectiveFieldLabelMap = computed(() => ({
   groupId: '所属分组',
   runInTestEnv: '测试环境执行',
   runInProdEnv: '生产环境执行',
-  caseStatus: '用例状态',
   ...props.fieldLabelMap,
 }))
 

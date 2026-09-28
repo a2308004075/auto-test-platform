@@ -7,7 +7,7 @@
 /**
  * 手动计划执行页 - M9
  * 行 = 计划关联手动化用例；结果列表头固定「执行结果」，每行显示该行最后一个有记录的列，值为「列名：状态，备注」
- * 点击行内【执行】按钮弹窗：展示用例标题/内容/信息字段（分组、状态、动态字段，与手动用例详情同源），
+ * 点击行内【执行】按钮弹窗：展示用例标题/内容/信息字段（分组、动态字段，与手动用例详情同源），
  * 一次标记该用例在所有结果列上的结果（下拉 + 备注）
  * 【执行完成】快照列定义与各格记录结果，形成测试记录
  */
@@ -28,8 +28,7 @@ import { getCustomFieldsForRender } from '@/api/customField'
 import { getManualCaseGroups } from '@/api/manualCase'
 import { createDefect, getDefectGroups } from '@/api/defect'
 import { getContentTemplates } from '@/api/contentTemplate'
-import { useDict } from '@/composables/useDict'
-import { useManualCaseStatusOptions } from '@/composables/useManualCaseStatus'
+import { useExecutionResultOptions } from '@/composables/useExecutionResultOptions'
 import { isScopeVisible } from '@/utils/customFieldScope'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
 import '@wangeditor/editor/dist/css/style.css'
@@ -51,11 +50,8 @@ const createdAt = ref('')
 const columns = ref<any[]>([])
 const rows = ref<any[]>([])
 
-// 结果状态下拉：test_result_status 字典过滤 通过/失败/跳过
-const { options: statusDictOptions } = useDict('test_result_status')
-const cellStatusOptions = computed(() =>
-  statusDictOptions.value.filter((o) => ['PASSED', 'FAILED', 'SKIPPED'].includes(o.value)),
-)
+// 结果状态下拉：优先读【页面配置-用例执行】的"执行结果"字段配置（按项目），无配置回退内置选项
+const { options: cellStatusOptions } = useExecutionResultOptions(() => projectId.value)
 
 // 展示样式映射（非字典选项，仅 el-tag 配色）
 const executionStatusMap: Record<string, { label: string; type: string }> = {
@@ -105,7 +101,7 @@ function applyCell(row: any, columnId: number, status: string, remark: string) {
   }
 }
 
-/** 结果状态展示标签（取自字典选项，避免硬编码文案） */
+/** 结果状态展示标签（取自【页面配置-用例执行】选项，避免硬编码文案；选项已删时回退显示原值） */
 function statusLabelOf(status?: string) {
   if (!status) return ''
   return cellStatusOptions.value.find((o) => o.value === status)?.label || status
@@ -146,8 +142,6 @@ const executeForm = ref<Array<{ columnId: number; columnName: string; status: st
 // 弹窗「用例信息」元数据：动态字段定义（详情位置）与分组名映射，与手动用例列表/详情同源
 const caseFieldDefs = ref<any[]>([])
 const caseGroupNameMap = ref<Record<string, string>>({})
-// 用例状态选项优先读【页面配置-手动用例字段】的「状态」字段配置（按项目），无配置回退内置选项
-const { options: caseStatusOptions } = useManualCaseStatusOptions(() => projectId.value)
 
 /** 加载弹窗「用例信息」所需元数据（动态字段定义 + 分组名映射） */
 async function loadCaseMeta() {
@@ -157,9 +151,9 @@ async function loadCaseMeta() {
       module: 'manual_case',
       viewType: 'edit',
     })
-    // 状态字段（case_status）单独展示不进字段列表；仅显示「详情」位置的字段（与用例详情页字段信息一致）
+    // 仅显示「详情」位置的字段（与用例详情页字段信息一致）
     caseFieldDefs.value = (res.data || []).filter(
-      (f: any) => f.fieldKey !== 'case_status' && isScopeVisible(f.displayScope, 'detail'),
+      (f: any) => isScopeVisible(f.displayScope, 'detail'),
     )
   } catch { caseFieldDefs.value = [] }
   try {
@@ -186,13 +180,6 @@ function caseFieldText(field: any): string {
     return hit ? hit.label : value
   }
   return value
-}
-
-/** 用例状态展示标签（配置驱动，与手动用例列表一致） */
-function caseStatusLabelOf(status: any) {
-  if (status === undefined || status === null || status === '') return ''
-  const hit = caseStatusOptions.value.find((o: any) => String(o.value) === String(status))
-  return hit ? hit.label : String(status)
 }
 
 /** 所属分组名称（未分组/分组已删除统一显示「未分组」） */
@@ -643,16 +630,12 @@ onMounted(() => {
         </a>
       </div>
       <div v-else class="exec-attachment-empty">暂无附件</div>
-      <!-- 字段：所属分组/用例状态 + 动态字段（与手动用例详情同源，仅显示「详情」位置的字段） -->
+      <!-- 字段：所属分组 + 动态字段（与手动用例详情同源，仅显示「详情」位置的字段） -->
       <div class="exec-block-title">字段</div>
       <div class="exec-meta">
         <div class="exec-meta-item">
           <span class="exec-meta-label">所属分组</span>
           <span class="exec-meta-value">{{ caseGroupNameOf(executeRow?.groupId) }}</span>
-        </div>
-        <div class="exec-meta-item">
-          <span class="exec-meta-label">用例状态</span>
-          <span class="exec-meta-value">{{ caseStatusLabelOf(executeRow?.caseStatus) || '-' }}</span>
         </div>
         <div v-for="field in caseFieldDefs" :key="field.fieldKey" class="exec-meta-item">
           <span class="exec-meta-label">{{ field.fieldLabel }}</span>

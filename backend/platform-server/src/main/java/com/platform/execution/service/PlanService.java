@@ -534,7 +534,6 @@ public class PlanService {
                 ManualCaseBriefDTO caseBrief = new ManualCaseBriefDTO();
                 caseBrief.setId(manualCase.getId());
                 caseBrief.setTitle(manualCase.getTitle());
-                caseBrief.setCaseStatus(manualCase.getCaseStatus());
                 manualCaseDetails.add(caseBrief);
             }
         }

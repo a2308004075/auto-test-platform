@@ -7,13 +7,13 @@
 /**
  * 手动化用例列表
  * 左侧分组树 + 右侧高级搜索 + 批量操作 + 分页表格
- * 列表列与筛选项由【页面配置-手动用例字段】驱动（状态走专门列，值走 case_status 列）
+ * 列表列与筛选项由【页面配置-手动用例字段】驱动
  */
 import { ref, reactive, nextTick, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  getManualCases, deleteManualCase, toggleManualCaseStatus, updateManualCase,
+  getManualCases, deleteManualCase, updateManualCase,
   getManualCaseGroups, createManualCaseGroup, updateManualCaseGroup,
   deleteManualCaseGroup, clearManualGroupCases, clearManualProjectCases
 } from '@/api/manualCase'
@@ -21,7 +21,6 @@ import PageHeader from '@/components/PageHeader/index.vue'
 import ProSearchCard from '@/components/ProSearchCard/index.vue'
 import BatchBar from '@/components/BatchBar/index.vue'
 import ProPagination from '@/components/ProPagination/index.vue'
-import { useManualCaseStatusOptions } from '@/composables/useManualCaseStatus'
 import { getCustomFieldsForRender } from '@/api/customField'
 import { isScopeVisible } from '@/utils/customFieldScope'
 import { usePermission } from '@/composables/usePermission'
@@ -30,8 +29,6 @@ const route = useRoute()
 const router = useRouter()
 const projectId = computed(() => Number(route.params.id))
 const { hasPermission } = usePermission()
-// 状态选项优先读【页面配置-手动用例字段】的"状态"字段配置（按项目），无配置回退内置选项
-const { options: statusOptions } = useManualCaseStatusOptions(() => projectId.value)
 
 // ===== 列表数据 =====
 const loading = ref(false)
@@ -40,7 +37,7 @@ const pagination = reactive({ current: 1, pageSize: 20, total: 0 })
 const selectedRows = ref<any[]>([])
 
 // ===== 搜索条件 =====
-const search = reactive({ title: '', caseStatus: '' })
+const search = reactive({ title: '' })
 // 动态字段筛选（fieldKey -> 值：单值字符串或日期范围 [start, end]）
 const searchCustom = reactive<Record<string, any>>({})
 
@@ -128,7 +125,6 @@ async function fetchList() {
     const res: any = await getManualCases(projectId.value, {
       groupId: groupIdParam,
       keyword: search.title || undefined,
-      caseStatus: search.caseStatus || undefined,
       customFilters: Object.keys(customFilters).length > 0 ? JSON.stringify(customFilters) : undefined,
       page: pagination.current, pageSize: pagination.pageSize,
     })
@@ -152,7 +148,7 @@ function selectGroup(id: number) {
 
 function handleSearch() { pagination.current = 1; fetchList() }
 function handleReset() {
-  Object.assign(search, { title: '', caseStatus: '' })
+  Object.assign(search, { title: '' })
   for (const key of Object.keys(searchCustom)) delete searchCustom[key]
   activeGroupId.value = 0
   handleSearch()
@@ -240,8 +236,6 @@ function handleSelectionChange(rows: any[]) { selectedRows.value = rows }
 
 function handleBatchAction(key: string) {
   if (key === 'delete') handleBatchDelete()
-  else if (key === 'enable') handleBatchToggle(true)
-  else if (key === 'disable') handleBatchToggle(false)
   else if (key === 'move') batchMoveVisible.value = true
 }
 function clearSelection() { selectedRows.value = [] }
@@ -258,20 +252,6 @@ function handleBatchDelete() {
     clearSelection()
     fetchGroups(); fetchList()
   }).catch(() => {})
-}
-
-async function handleBatchToggle(enable: boolean) {
-  const target = enable ? '启用' : '废弃'
-  try {
-    for (const row of selectedRows.value) {
-      const shouldToggle = enable ? row.caseStatus !== 1 : row.caseStatus === 1
-      if (shouldToggle) {
-        await toggleManualCaseStatus(projectId.value, row.id)
-      }
-    }
-    ElMessage.success(`批量${target}成功`)
-    fetchList()
-  } catch { ElMessage.error(`批量${target}失败`) }
 }
 
 // 批量改组
@@ -338,14 +318,6 @@ async function handleTitleBlur(row: any) {
   }
 }
 
-async function handleToggleStatus(record: any) {
-  try {
-    await toggleManualCaseStatus(projectId.value, record.id)
-    ElMessage.success(record.caseStatus === 1 ? '已废弃' : '已启用')
-    fetchList()
-  } catch { ElMessage.error('操作失败') }
-}
-
 function handleDelete(record: any) {
   ElMessageBox.confirm(`确定删除用例「${record.title}」？`, '确认删除', { type: 'warning' })
     .then(async () => { await deleteManualCase(projectId.value, record.id); ElMessage.success('删除成功'); fetchGroups(); fetchList() })
@@ -392,7 +364,7 @@ function handleDeleteGroup(g: any) {
 // ===== 动态字段列（与详情页"字段信息"同源：【页面配置-手动用例字段】统一存 edit 视图） =====
 const displayFields = ref<any[]>([])
 
-/** 加载列表动态列：状态走专门列、多行文本内容长不进列表；不含"详情"位置的字段不进列表（列表属查看场景，与详情一致） */
+/** 加载列表动态列：多行文本内容长不进列表；不含"详情"位置的字段不进列表（列表属查看场景，与详情一致） */
 async function fetchDisplayFields() {
   try {
     const res: any = await getCustomFieldsForRender({
@@ -401,7 +373,7 @@ async function fetchDisplayFields() {
       viewType: 'edit',
     })
     displayFields.value = (res.data || []).filter(
-      (f: any) => f.fieldKey !== 'case_status' && f.fieldType !== 'textarea' && isScopeVisible(f.displayScope, 'detail'),
+      (f: any) => f.fieldType !== 'textarea' && isScopeVisible(f.displayScope, 'detail'),
     )
   } catch { displayFields.value = [] }
 }
@@ -484,12 +456,6 @@ onBeforeUnmount(() => {
             <el-input v-model="search.title" placeholder="搜索用例标题" clearable style="width: 180px" @keyup.enter="handleSearch" />
           </div>
           <div class="pro-search-field">
-            <span class="pro-search-label">状态</span>
-            <el-select v-model="search.caseStatus" placeholder="全部" clearable style="width: 120px">
-              <el-option v-for="s in statusOptions" :key="s.value" :value="s.value" :label="s.label" />
-            </el-select>
-          </div>
-          <div class="pro-search-field">
             <span class="pro-search-label">所属分组</span>
             <el-tree-select
               :model-value="activeGroupId === 0 ? undefined : activeGroupId"
@@ -548,8 +514,6 @@ onBeforeUnmount(() => {
         <BatchBar
           :selected-count="selectedIds.length"
           :actions="[
-            { key: 'enable', label: '批量启用' },
-            { key: 'disable', label: '批量废弃' },
             { key: 'move', label: '批量修改分组' },
             { key: 'delete', label: '批量删除', danger: true },
           ]"
@@ -589,11 +553,6 @@ onBeforeUnmount(() => {
               {{ fieldDisplayText(field, row) }}
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="80">
-            <template #default="{ row }">
-              <el-tag :type="row.caseStatus === 1 ? 'success' : 'danger'" size="small">{{ row.caseStatus === 1 ? '使用' : '废弃' }}</el-tag>
-            </template>
-          </el-table-column>
           <el-table-column prop="createdByName" label="创建人" width="110" show-overflow-tooltip />
           <el-table-column label="创建时间" width="150">
             <template #default="{ row }">
@@ -603,7 +562,6 @@ onBeforeUnmount(() => {
           <el-table-column label="操作" width="180" fixed="right">
             <template #default="{ row }">
               <el-button type="primary" link size="small" @click="handleView(row)">详情</el-button>
-              <el-button v-if="hasPermission('project:manual-case:toggle')" type="primary" link size="small" @click="handleToggleStatus(row)">{{ row.caseStatus === 1 ? '废弃' : '启用' }}</el-button>
               <el-button v-if="hasPermission('project:manual-case:delete')" type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
             </template>
           </el-table-column>

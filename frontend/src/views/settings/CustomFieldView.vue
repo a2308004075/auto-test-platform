@@ -33,7 +33,7 @@ const currentProjectId = computed(() => projectStore.currentProjectId)
 const currentProjectName = computed(() => projectStore.currentProjectName)
 
 // ===== 左侧层级树：项目 → 功能页 → 配置页（缺陷/手动用例/需求各含【字段设置】【内容模板】两个叶子；
-//      字段统一存 edit 视图，由"显示位置"驱动新建/详情差异） =====
+//      用例执行仅含【字段设置】；字段统一存 edit 视图，由"显示位置"驱动新建/详情差异） =====
 interface PageNode {
   label: string
   /** 配置页：field-字段设置，template-内容模板 */
@@ -51,10 +51,16 @@ const MODULE_CHILDREN: PageNode[] = [
   { label: '内容模板', page: 'template' },
 ]
 
+// 用例执行功能页仅提供字段设置（执行结果枚举配置，无内容模板）
+const FIELD_ONLY_CHILDREN: PageNode[] = [
+  { label: '字段设置', page: 'field' },
+]
+
 const moduleTree: ModuleNode[] = [
   { label: '缺陷', module: 'defect', children: MODULE_CHILDREN },
   { label: '手动用例', module: 'manual_case', children: MODULE_CHILDREN },
   { label: '需求', module: 'requirement', children: MODULE_CHILDREN },
+  { label: '用例执行', module: 'execution', children: FIELD_ONLY_CHILDREN },
 ]
 
 // 树展开状态（根=项目，模块=功能页，默认全部展开）
@@ -63,6 +69,7 @@ const moduleExpanded = reactive<Record<string, boolean>>({
   defect: true,
   manual_case: true,
   requirement: true,
+  execution: true,
 })
 
 function toggleRoot() {
@@ -110,7 +117,7 @@ const fieldTypeLabelMap: Record<string, string> = {
 }
 
 // 显示位置：多选（create=新建显示 / detail=详情(编辑)显示），选项文案按当前模块动态生成
-const MODULE_SHORT_NAMES: Record<string, string> = { defect: '缺陷', manual_case: '手动用例', requirement: '需求' }
+const MODULE_SHORT_NAMES: Record<string, string> = { defect: '缺陷', manual_case: '手动用例', requirement: '需求', execution: '用例执行' }
 const moduleShortName = computed(() => MODULE_SHORT_NAMES[selectedModule.value] || '需求')
 const displayScopeOptions = computed(() => [
   { label: `新建${moduleShortName.value}`, value: 'create' },
@@ -157,7 +164,7 @@ const form = reactive({
 })
 
 // 下拉框选项动态编辑（仅填显示文本；存储值"值随行保留"：拖拽调序/增删选项均不改变存量数据语义，
-// 与状态字段（defect_status/case_status）编码处理一致；缺值行保存时自动分配新值）
+// 与状态字段（defect_status）编码处理一致；缺值行保存时自动分配新值）
 /** 枚举选项行：uid=行唯一标识（v-for key 与拖拽重排身份），value=存储值 */
 interface OptionRow {
   uid: number
@@ -173,10 +180,15 @@ function nextOptionRowUid(): number {
 }
 
 const isSelectType = computed(() => form.fieldType === 'select')
-// 各模块系统状态字段 key：值走业务表列，配置仅作状态下拉框选项来源（编码不可重排、类型不可改、不可删除）
-const STATUS_FIELD_KEYS: Record<string, string> = { defect: 'defect_status', manual_case: 'case_status' }
+// 系统关键字段 key：缺陷状态值走业务表列、执行结果值存 test_result.round_results，
+// 配置均仅作对应下拉框选项来源（编码不可重排、类型不可改、不可删除、固定排第一位）
+const STATUS_FIELD_KEYS: Record<string, string> = { defect: 'defect_status', execution: 'execution_result' }
 const statusFieldKey = computed(() => STATUS_FIELD_KEYS[selectedModule.value] || '')
 const isStatusField = computed(() => isEdit.value && !!statusFieldKey.value && editingFieldKey.value === statusFieldKey.value)
+/** 系统关键字段显示名（提示文案用，配置缺失时回退"状态"） */
+const statusFieldLabel = computed(
+  () => fieldList.value.find((f: any) => f.fieldKey === statusFieldKey.value)?.fieldLabel || '状态',
+)
 
 // 类型切换时清理互斥配置（枚举选项仅 select 用）
 function handleFieldTypeChange() {
@@ -405,7 +417,7 @@ function ensureSortable() {
     handle: '.cf-drag-handle',
     animation: 150,
     ghostClass: 'cf-drag-ghost',
-    // 「状态」字段位置不可修改：禁止任何行插入到它之前（状态行本身无拖拽手柄、不可拖动）
+    // 系统关键字段位置不可修改：禁止任何行插入到它之前（该行无拖拽手柄、不可拖动）
     onMove: (evt) => {
       const statusIdx = fieldList.value.findIndex((f: any) => f.fieldKey === statusFieldKey.value)
       if (statusIdx < 0) return true
@@ -433,9 +445,9 @@ async function handleDragEnd(oldIndex?: number, newIndex?: number) {
   const list = [...fieldList.value]
   const [moved] = list.splice(oldIndex, 1)
   list.splice(newIndex, 0, moved)
-  // 「状态」字段位置不可修改：兜底校验（拖拽约束已阻止，异常情况下恢复原顺序）
+  // 系统关键字段位置不可修改：兜底校验（拖拽约束已阻止，异常情况下恢复原顺序）
   if (list.findIndex((f: any) => f.fieldKey === statusFieldKey.value) > 0) {
-    ElMessage.warning('「状态」字段固定排第一位，不能调整其位置')
+    ElMessage.warning(`「${statusFieldLabel.value}」字段固定排第一位，不能调整其位置`)
     await fetchList()
     return
   }

@@ -135,13 +135,6 @@ onMounted(() => {
           <el-table :data="manualCaseDetails" row-key="id" border stripe>
             <el-table-column prop="id" label="ID" width="80" />
             <el-table-column prop="title" label="用例标题" min-width="300" show-overflow-tooltip />
-            <el-table-column label="状态" width="80" align="center">
-              <template #default="{ row }">
-                <el-tag :type="row.caseStatus === 1 ? 'success' : 'info'" size="small">
-                  {{ row.caseStatus === 1 ? '使用' : '废弃' }}
-                </el-tag>
-              </template>
-            </el-table-column>
             <el-table-column label="操作" width="80" align="center">
               <template #default="{ row }">
                 <el-button type="danger" link size="small" @click="handleRemoveManualCase(row)">移除</el-button>

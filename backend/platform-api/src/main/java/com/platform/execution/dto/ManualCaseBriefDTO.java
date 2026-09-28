@@ -24,9 +24,4 @@ public class ManualCaseBriefDTO {
      * 用例标题
      */
     private String title;
-
-    /**
-     * 用例状态（1-使用，0-废弃）
-     */
-    private Integer caseStatus;
 }

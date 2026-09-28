@@ -58,8 +58,7 @@ import java.util.stream.Collectors;
  * 手动化用例管理服务
  *
  * <p>用例类型/优先级/环境执行标记等属性字段由【页面配置-手动用例字段】动态驱动，
- * 值存 sys_custom_field_value（统一 edit 视图）；用例状态保留 case_status 列，
- * 由详情页状态下拉切换（选项来源为【页面配置】中 fieldKey=case_status 的配置）。</p>
+ * 值存 sys_custom_field_value（统一 edit 视图）。</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -86,7 +85,7 @@ public class ManualCaseService {
      * @param groupId   分组 ID（null=不过滤，0=未分组，正数=指定分组含子孙分组）
      */
     public PageResponse<ManualCaseResponse> listCases(Long projectId, Long groupId, String keyword,
-                                                       String caseStatus, String customFilters,
+                                                       String customFilters,
                                                        int page, int pageSize) {
         projectService.findActiveById(projectId);
 
@@ -105,9 +104,6 @@ public class ManualCaseService {
         if (StringUtils.hasText(keyword)) {
             wrapper.and(w -> w.like(ManualCase::getTitle, keyword)
                     .or().like(ManualCase::getContent, keyword));
-        }
-        if (StringUtils.hasText(caseStatus)) {
-            wrapper.eq(ManualCase::getCaseStatus, Integer.parseInt(caseStatus));
         }
         // 动态字段筛选（【页面配置-手动用例字段】视图的列作为筛选项）
         applyCustomFieldFilters(projectId, wrapper, customFilters);
@@ -220,8 +216,6 @@ public class ManualCaseService {
         ManualCase c = new ManualCase();
         BeanUtils.copyProperties(request, c);
         c.setProjectId(projectId);
-        // 用例状态固定为"使用"（1），后续由详情页状态下拉切换
-        c.setCaseStatus(1);
         c.setCreatedBy(getCurrentUserId());
         manualCaseMapper.insert(c);
 
@@ -320,31 +314,6 @@ public class ManualCaseService {
         findById(caseId);
         deleteChildren(caseId);
         manualCaseMapper.deleteById(caseId);
-    }
-
-    /**
-     * 启用/废弃手动化用例（targetStatus 为空时按当前值取反；
-     * 列表快捷启停不传目标值，详情页状态下拉传入目标值）
-     */
-    @Transactional(rollbackFor = Exception.class)
-    public ManualCaseResponse toggleStatus(Long caseId, Integer targetStatus) {
-        ManualCase c = findById(caseId);
-        Integer oldCaseStatus = c.getCaseStatus();
-        Integer newStatus = targetStatus != null
-                ? targetStatus
-                : (Integer.valueOf(1).equals(oldCaseStatus) ? 0 : 1);
-        if (Objects.equals(oldCaseStatus, newStatus)) {
-            return toResponse(c);
-        }
-        c.setCaseStatus(newStatus);
-        manualCaseMapper.updateById(c);
-
-        // 记录状态变更
-        ChangeLogHelper.collect(BizType.MANUAL_CASE, caseId, changeLogService)
-                .compare("caseStatus", oldCaseStatus, newStatus)
-                .save();
-
-        return toResponse(c);
     }
 
     // ───────────── 附件 ─────────────

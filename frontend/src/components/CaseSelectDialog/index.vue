@@ -83,7 +83,6 @@ async function fetchList() {
         title: item.title,
         // 优先级为动态字段（由【页面配置-手动用例字段】驱动），值存 customFields.priority
         priority: item.customFields?.priority,
-        status: item.caseStatus,
       }))
       pagination.total = res.data?.total || 0
     } else {
@@ -175,7 +174,7 @@ function handleConfirm() {
       <el-table-column prop="id" label="ID" width="80" />
       <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip />
       <el-table-column prop="priority" label="优先级" width="80" />
-      <el-table-column label="状态" width="80">
+      <el-table-column v-if="activeTab !== 'MANUAL_CASE'" label="状态" width="80">
         <template #default="{ row }">
           <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
             {{ row.status === 1 ? '启用' : '废弃' }}

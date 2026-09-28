@@ -70,17 +70,24 @@ public class CustomFieldService {
     public static final String DEFECT_STATUS_FIELD_KEY = "defect_status";
 
     /**
-     * 手动用例状态字段的固定 fieldKey：手动用例详情页状态下拉框的选项来源
+     * 用例执行模块标识：【页面配置-用例执行】功能页（执行页结果标记的选项来源）
      */
-    public static final String MANUAL_CASE_STATUS_FIELD_KEY = "case_status";
+    public static final String EXECUTION_MODULE = "execution";
 
     /**
-     * 各模块"状态"系统字段的固定 fieldKey 映射（module -> fieldKey）
+     * 执行结果字段的固定 fieldKey：手动计划执行页结果标记下拉框的选项来源
+     */
+    public static final String EXECUTION_RESULT_FIELD_KEY = "execution_result";
+
+    /**
+     * 各模块系统关键字段的固定 fieldKey 映射（module -> fieldKey）：
+     * defect-状态（流转状态）、execution-执行结果（结果标记），
+     * 均为系统预置、不可删除、固定排第一位
      */
     private static final Map<String, String> STATUS_FIELD_KEYS = new HashMap<>();
     static {
         STATUS_FIELD_KEYS.put("defect", DEFECT_STATUS_FIELD_KEY);
-        STATUS_FIELD_KEYS.put("manual_case", MANUAL_CASE_STATUS_FIELD_KEY);
+        STATUS_FIELD_KEYS.put(EXECUTION_MODULE, EXECUTION_RESULT_FIELD_KEY);
     }
 
     /**
@@ -95,10 +102,16 @@ public class CustomFieldService {
             "[{\"label\":\"新建\",\"value\":\"NEW\"},{\"label\":\"待确认\",\"value\":\"TO_CONFIRM\"},{\"label\":\"修复中\",\"value\":\"FIXING\"},{\"label\":\"待部署\",\"value\":\"TO_DEPLOY\"},{\"label\":\"待验证\",\"value\":\"PENDING\"},{\"label\":\"已修复\",\"value\":\"COMPLETED\"},{\"label\":\"重新打开\",\"value\":\"REOPENED\"},{\"label\":\"延期修复\",\"value\":\"DEFERRED\"},{\"label\":\"无需修复\",\"value\":\"CLOSED\"}]";
 
     /**
-     * 新建项目时预置的手动用例状态选项（value 与 manual_case.case_status 列值一致：1-使用，0-废弃）
+     * 新建项目时预置的执行结果选项（value 与 test_result.round_results 现有英文编码一致，存量数据无需迁移）
      */
-    private static final String DEFAULT_MANUAL_CASE_STATUS_OPTIONS_JSON =
-            "[{\"label\":\"使用\",\"value\":\"1\"},{\"label\":\"废弃\",\"value\":\"0\"}]";
+    private static final String DEFAULT_EXECUTION_RESULT_OPTIONS_JSON =
+            "[{\"label\":\"通过\",\"value\":\"PASSED\"},{\"label\":\"失败\",\"value\":\"FAILED\"},{\"label\":\"跳过\",\"value\":\"SKIPPED\"}]";
+
+    /**
+     * 执行结果字段配置缺失/选项为空时的回退状态值（与预置选项一致，保证未配置项目标记功能不回退）
+     */
+    private static final List<String> FALLBACK_EXECUTION_RESULT_VALUES =
+            Arrays.asList("PASSED", "FAILED", "SKIPPED");
 
     /**
      * 管理页列表（按 sortNo 排序；"状态"系统字段固定排第一位）
@@ -213,16 +226,57 @@ public class CustomFieldService {
     }
 
     /**
-     * 为项目预置手动用例"状态"字段（【页面配置-手动用例字段】视图）
+     * 为项目预置"执行结果"字段（【页面配置-用例执行】功能页）
      *
-     * <p>新建项目时调用：状态字段是详情页状态下拉框的选项来源，须始终可配置；
-     * 选项 value 与 manual_case.case_status 列值一致（1-使用，0-废弃），存量数据无需迁移
+     * <p>新建项目时调用：执行结果字段是手动计划执行页结果标记下拉框的选项来源，须始终可配置；
+     * 选项 value 沿用 test_result.round_results 现有英文编码（PASSED/FAILED/SKIPPED），存量数据无需迁移；
+     * 结果值不走 sys_custom_field_value（存 test_result.round_results JSON），配置仅作选项来源
      */
     @Transactional(rollbackFor = Exception.class)
-    public void createDefaultManualCaseStatusField(Long projectId) {
-        createStatusField(projectId, "manual_case", MANUAL_CASE_STATUS_FIELD_KEY,
-                "手动用例启用状态（使用/废弃）的枚举选项：详情页状态下拉框的选项来源；删除选项后存量用例保留原状态值",
-                DEFAULT_MANUAL_CASE_STATUS_OPTIONS_JSON);
+    public void createDefaultExecutionResultField(Long projectId) {
+        createStatusField(projectId, EXECUTION_MODULE, EXECUTION_RESULT_FIELD_KEY,
+                "手动计划执行页结果标记下拉框的枚举选项：可增删选项、修改显示名、调整顺序；删除选项后已记录的结果保留原值",
+                DEFAULT_EXECUTION_RESULT_OPTIONS_JSON);
+    }
+
+    /**
+     * 读取项目"执行结果"字段配置的合法状态值列表（执行页单元格标记校验用）
+     *
+     * <p>配置缺失/选项为空/解析失败时回退默认 PASSED/FAILED/SKIPPED，保证未配置项目标记功能不回退
+     */
+    public List<String> listExecutionResultStatusValues(Long projectId) {
+        if (projectId == null) {
+            return FALLBACK_EXECUTION_RESULT_VALUES;
+        }
+        LambdaQueryWrapper<CustomField> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(CustomField::getProjectId, projectId)
+                .eq(CustomField::getModule, EXECUTION_MODULE)
+                .eq(CustomField::getFieldKey, EXECUTION_RESULT_FIELD_KEY)
+                .eq(CustomField::getIsActive, 1);
+        List<CustomField> fields = customFieldMapper.selectList(wrapper);
+        if (fields.isEmpty()) {
+            return FALLBACK_EXECUTION_RESULT_VALUES;
+        }
+        String optionsJson = fields.get(0).getOptionsJson();
+        if (optionsJson == null || optionsJson.trim().isEmpty()) {
+            return FALLBACK_EXECUTION_RESULT_VALUES;
+        }
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            List<Map<String, String>> rows = mapper.readValue(optionsJson,
+                    mapper.getTypeFactory().constructCollectionType(List.class, Map.class));
+            List<String> values = new ArrayList<>();
+            for (Map<String, String> row : rows) {
+                String value = row.get("value");
+                if (value != null && !value.trim().isEmpty()) {
+                    values.add(value.trim());
+                }
+            }
+            return values.isEmpty() ? FALLBACK_EXECUTION_RESULT_VALUES : values;
+        } catch (Exception e) {
+            log.warn("解析执行结果字段选项 JSON 失败: {}", optionsJson, e);
+            return FALLBACK_EXECUTION_RESULT_VALUES;
+        }
     }
 
     /**
@@ -257,10 +311,11 @@ public class CustomFieldService {
         if (field == null) {
             throw new BusinessException(ErrorCode.CUSTOM_FIELD_NOT_FOUND, "字段不存在");
         }
-        // 状态字段是状态下拉框的选项来源，且新建字段的 fieldKey 为自动生成的 UUID，
+        // 系统关键字段（缺陷状态/执行结果）是下拉框的选项来源，且新建字段的 fieldKey 为自动生成的 UUID，
         // 删除后无法重建同 fieldKey 的字段，故禁止删除
         if (isStatusField(field.getModule(), field.getFieldKey())) {
-            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "系统预置的状态字段不可删除");
+            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR,
+                    "系统预置的「" + field.getFieldLabel() + "」字段不可删除");
         }
         customFieldMapper.deleteById(id);
     }
@@ -311,11 +366,15 @@ public class CustomFieldService {
         Map<Long, CustomField> fieldMap = fields.stream()
                 .collect(Collectors.toMap(CustomField::getId, f -> f));
 
-        // "状态"字段位置不可修改：配置中存在状态字段时，其必须位于提交顺序的第一位
+        // 系统关键字段（缺陷状态/执行结果）位置不可修改：配置中存在时，其必须位于提交顺序的第一位
         boolean hasStatusField = fields.stream()
                 .anyMatch(f -> isStatusField(f.getModule(), f.getFieldKey()));
         if (hasStatusField && !isStatusField(module, fieldMap.get(orderedIds.get(0)).getFieldKey())) {
-            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "「状态」字段固定排第一位，不能调整其位置");
+            String statusFieldLabel = fields.stream()
+                    .filter(f -> isStatusField(f.getModule(), f.getFieldKey()))
+                    .findFirst().map(CustomField::getFieldLabel).orElse("状态");
+            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR,
+                    "「" + statusFieldLabel + "」字段固定排第一位，不能调整其位置");
         }
 
         for (int i = 0; i < orderedIds.size(); i++) {

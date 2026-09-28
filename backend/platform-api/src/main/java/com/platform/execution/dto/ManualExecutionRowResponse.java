@@ -45,11 +45,6 @@ public class ManualExecutionRowResponse {
     private String priority;
 
     /**
-     * 用例状态（1-使用，0-废弃）
-     */
-    private Integer caseStatus;
-
-    /**
      * 用例内容（富文本：前置条件/操作步骤/预期结果）
      */
     private String content;

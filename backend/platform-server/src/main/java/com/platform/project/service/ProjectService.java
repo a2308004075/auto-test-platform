@@ -186,8 +186,8 @@ public class ProjectService {
         // 预置缺陷"状态"字段（【页面配置-缺陷字段】视图，流转状态下拉框的选项来源）
         customFieldService.createDefaultStatusField(project.getId());
 
-        // 预置手动用例"状态"字段（【页面配置-手动用例字段】视图，详情页状态下拉框的选项来源）
-        customFieldService.createDefaultManualCaseStatusField(project.getId());
+        // 预置"执行结果"字段（【页面配置-用例执行】功能页，执行页结果标记下拉框的选项来源）
+        customFieldService.createDefaultExecutionResultField(project.getId());
 
         return toResponse(project);
     }

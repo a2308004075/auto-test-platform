@@ -6,11 +6,10 @@
 <script setup lang="ts">
 /**
  * 手动化用例统一视图（新建 / 详情同一界面，按路由是否带 caseId 区分模式）
- * 新建模式（/manual-cases/new）：无创建人/创建时间/状态、删除与右侧评论/变更记录；
+ * 新建模式（/manual-cases/new）：无创建人/创建时间、删除与右侧评论/变更记录；
  * 标题在页头直接输入，内容（富文本）直接编辑，参考缺陷"内容"（WangEditor + 全屏；新建页自动填入内容模板），
  * 附件与关联本页暂存、随创建一次性提交（关联参考缺陷"关联"：统一表格，弹窗选目标类型=需求/缺陷），保存后返回列表
  * 详情模式（/manual-cases/:caseId）：标题点击行内编辑失焦保存；内容查看态只读，编辑/取消/保存在内容标题行；
- * 用例状态由页头状态下拉切换（值走 case_status 列，选项来自【页面配置-手动用例字段】）
  * 字段信息：统一使用【页面配置-手动用例字段】配置，按"显示位置"区分新建/详情可见性
  * 附件 / 关联：新建本页暂存；详情直接操作（增删即时保存）
  */
@@ -18,7 +17,7 @@ import { ref, reactive, computed, watch, onMounted, nextTick, shallowRef } from 
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  getManualCase, createManualCase, updateManualCase, deleteManualCase, toggleManualCaseStatus,
+  getManualCase, createManualCase, updateManualCase, deleteManualCase,
   addManualCaseAttachment, deleteManualCaseAttachment, getManualCaseGroups,
 } from '@/api/manualCase'
 import {
@@ -33,7 +32,6 @@ import ChangeLogPanel from '@/components/ChangeLogPanel/index.vue'
 import RequirementItemSelectDialog from '@/components/RequirementItemSelectDialog/index.vue'
 import DefectSelectDialog from '@/components/DefectSelectDialog/index.vue'
 import { getCustomFieldsForRender } from '@/api/customField'
-import { useManualCaseStatusOptions } from '@/composables/useManualCaseStatus'
 import { isScopeVisible } from '@/utils/customFieldScope'
 import { getContentTemplates } from '@/api/contentTemplate'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
@@ -45,8 +43,6 @@ const projectId = computed(() => Number(route.params.id))
 const caseId = computed(() => Number(route.params.caseId))
 /** 新建模式：/manual-cases/new 路由不带 caseId 参数 */
 const isCreate = computed(() => !route.params.caseId)
-// 状态选项优先读【页面配置-手动用例字段】的"状态"字段配置（按项目），无配置回退内置选项
-const { options: statusOptions } = useManualCaseStatusOptions(() => projectId.value)
 
 const loading = ref(false)
 const saving = ref(false)
@@ -77,8 +73,6 @@ const form = reactive({
 const fieldValues = ref<Record<string, any>>({})
 // 动态字段配置全量（【页面配置-手动用例字段】统一存 edit 视图；含全部显示位置，变更记录翻译用）
 const editFields = ref<any[]>([])
-/** 「状态」必填标记：取【页面配置-手动用例字段】配置的 isRequired（系统预置为 1），页头状态区据此显示红星 */
-const statusRequired = ref(false)
 
 /** 当前模式可见字段：按"显示位置"过滤（新建=含"新建"位置；详情=含"详情"位置） */
 const visibleEditFields = computed(() =>
@@ -148,7 +142,6 @@ const historyFieldLabels = computed(() => {
     title: '用例标题',
     content: '内容',
     groupId: '所属分组',
-    caseStatus: '用例状态',
     attachment: '附件',
     relation: '关联',
   }
@@ -156,14 +149,11 @@ const historyFieldLabels = computed(() => {
   return map
 })
 
-/** 变更记录值 → 展示文案（状态/分组/动态字段枚举翻译为选项 label） */
+/** 变更记录值 → 展示文案（分组/动态字段枚举翻译为选项 label） */
 const historyValueLabels = computed(() => {
   const map: Record<string, Record<string, string>> = {
     groupId: groupNameMap.value,
   }
-  const statusMap: Record<string, string> = {}
-  statusOptions.value.forEach((o: any) => { statusMap[String(o.value)] = o.label })
-  map.caseStatus = statusMap
   editFields.value.forEach((f: any) => {
     const opts = parseFieldOptions(f)
     if (opts.length > 0) {
@@ -214,10 +204,7 @@ async function fetchEditFields() {
       viewType: 'edit',
     })
     const fields: any[] = res.data || []
-    // 「状态」必填标记：取页面配置（系统预置必填），页头状态区据此显示红星
-    statusRequired.value = fields.find((f: any) => f.fieldKey === 'case_status')?.isRequired === 1
-    // 状态字段（case_status）仅作为页头切换下拉的选项来源，不进字段信息区渲染（其值走 manual_case.case_status 列，不走自定义字段值）
-    editFields.value = fields.filter((f: any) => f.fieldKey !== 'case_status')
+    editFields.value = fields
     // 新建模式：初始化可见字段默认值（详情模式由后端回填值，无需默认值）
     if (isCreate.value) {
       for (const field of visibleEditFields.value) {
@@ -437,17 +424,6 @@ async function handleGroupChange(val: number | string | undefined) {
   }
 }
 
-/** 页头状态切换：值走 case_status 列（新建固定为使用，由详情页下拉切换） */
-async function handleStatusChange(val: string) {
-  const target = Number(val)
-  if (target === detail.value.caseStatus) return
-  try {
-    await toggleManualCaseStatus(projectId.value, caseId.value, target)
-    ElMessage.success('状态更新成功')
-    fetchDetail()
-  } catch { ElMessage.error('操作失败') }
-}
-
 /** 返回上一页：优先浏览器历史返回（从哪来回哪去）；无历史记录（直接打开链接）时兜底跳转用例列表 */
 function handleBack() {
   if (window.history.state?.back) router.back()
@@ -650,23 +626,11 @@ onMounted(() => {
       <!-- 左侧主信息 -->
       <div v-loading="loading" class="detail-main">
         <div class="detail-card">
-          <!-- 创建人/创建时间/状态：仅详情模式展示 -->
+          <!-- 创建人/创建时间：仅详情模式展示 -->
           <div v-if="!isCreate" class="detail-header">
             <div class="detail-meta">
               <span class="meta-item">创建人：{{ detail.createdByName || '-' }}</span>
               <span class="meta-item">创建时间：{{ formatDateTime(detail.createdAt) }}</span>
-              <div class="meta-status-group">
-                <!-- 必填标记：「状态」在【页面配置】中配置为必填时显示红星 -->
-                <span v-if="statusRequired" class="meta-asterisk">*</span>
-                <span class="meta-item">状态：</span>
-                <el-select
-                  :model-value="detail.caseStatus != null ? String(detail.caseStatus) : ''"
-                  style="width: 110px"
-                  @change="(val: string) => handleStatusChange(val)"
-                >
-                  <el-option v-for="s in statusOptions" :key="s.value" :value="s.value" :label="s.label" />
-                </el-select>
-              </div>
             </div>
           </div>
 
@@ -991,18 +955,6 @@ onMounted(() => {
 .meta-item {
   font-size: 13px;
   color: #909399;
-}
-/* 状态切换下拉框组（「状态：」+ 下拉框）固定在「创建人/创建时间」行右侧 */
-.meta-status-group {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-/* 必填星号（「状态」在【页面配置】中配置为必填时显示，样式对齐 Element Plus 必填标记） */
-.meta-asterisk {
-  color: var(--el-color-danger);
-  margin-right: -4px;
 }
 .field-grid {
   display: grid;

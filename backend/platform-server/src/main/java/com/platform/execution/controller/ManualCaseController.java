@@ -34,11 +34,10 @@ public class ManualCaseController {
     public ApiResponse<PageResponse<ManualCaseResponse>> list(@PathVariable Long projectId,
                                                                @RequestParam(required = false) Long groupId,
                                                                @RequestParam(required = false) String keyword,
-                                                               @RequestParam(required = false) String caseStatus,
                                                                @RequestParam(required = false) String customFilters,
                                                                @RequestParam(defaultValue = "1") int page,
                                                                @RequestParam(defaultValue = "20") int pageSize) {
-        return ApiResponse.ok(manualCaseService.listCases(projectId, groupId, keyword, caseStatus, customFilters, page, pageSize));
+        return ApiResponse.ok(manualCaseService.listCases(projectId, groupId, keyword, customFilters, page, pageSize));
     }
 
     /**
@@ -77,16 +76,6 @@ public class ManualCaseController {
                                      @PathVariable Long caseId) {
         manualCaseService.deleteCase(caseId);
         return ApiResponse.ok();
-    }
-
-    /**
-     * 启用/废弃手动化用例（targetStatus 为空时按当前值取反）
-     */
-    @PostMapping("/{caseId}/status")
-    public ApiResponse<ManualCaseResponse> toggleStatus(@PathVariable Long projectId,
-                                                         @PathVariable Long caseId,
-                                                         @RequestParam(required = false) Integer targetStatus) {
-        return ApiResponse.ok(manualCaseService.toggleStatus(caseId, targetStatus));
     }
 
     // ───────────── 附件 ─────────────
