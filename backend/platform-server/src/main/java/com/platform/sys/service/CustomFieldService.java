@@ -198,6 +198,11 @@ public class CustomFieldService {
             throw new BusinessException(ErrorCode.CUSTOM_FIELD_NOT_FOUND, "字段不存在");
         }
         validateFieldLabelUnique(request, id);
+        // 缺陷"状态"字段：系统预置选项"新建"（NEW）不可修改、删除，固定排第一位
+        // （前端弹窗已锁定 UI，此处兜底防绕过接口）
+        if (DEFECT_STATUS_FIELD_KEY.equals(field.getFieldKey())) {
+            validateDefectStatusNewOption(field.getOptionsJson(), request.getOptionsJson());
+        }
 
         // 排序值仅由拖拽排序接口（sort）专职管理：忽略请求携带的值，防止旧页面用陈旧值覆盖
         Integer originalSortNo = field.getSortNo();
@@ -400,6 +405,92 @@ public class CustomFieldService {
      */
     private boolean isStatusField(String module, String fieldKey) {
         return module != null && fieldKey != null && fieldKey.equals(STATUS_FIELD_KEYS.get(module));
+    }
+
+    /**
+     * 缺陷"状态"字段的系统预置选项"新建"（NEW）防护校验
+     *
+     * <p>"新建"是缺陷的初始流转状态（预置选项、预置默认值、存量缺陷状态值均锚定 NEW），
+     * 固定排第一位且显示文本不可修改、不可删除；前端弹窗已锁定 UI，此处兜底防绕过接口。
+     * 库中缺失 NEW（历史异常数据）时无锚可守，跳过校验。
+     *
+     * @param originalOptionsJson 库中现存选项 JSON（校验基准）
+     * @param requestOptionsJson  请求提交的选项 JSON
+     */
+    private void validateDefectStatusNewOption(String originalOptionsJson, String requestOptionsJson) {
+        List<Map<String, String>> originalRows = parseOptionsOrNull(originalOptionsJson);
+        if (originalRows == null) {
+            return;
+        }
+        String originalLabel = findOptionLabel(originalRows, DEFAULT_DEFECT_STATUS_VALUE);
+        if (originalLabel == null) {
+            return;
+        }
+        List<Map<String, String>> requestRows = parseOptionsOrNull(requestOptionsJson);
+        int newOptionIdx = requestRows == null ? -1 : indexOfOptionValue(requestRows, DEFAULT_DEFECT_STATUS_VALUE);
+        if (newOptionIdx < 0) {
+            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR,
+                    "系统预置选项「" + originalLabel + "」不可删除");
+        }
+        if (!originalLabel.equals(requestRows.get(newOptionIdx).get("label"))) {
+            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR,
+                    "系统预置选项「" + originalLabel + "」不可修改");
+        }
+        if (newOptionIdx != 0) {
+            throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR,
+                    "系统预置选项「" + originalLabel + "」固定排第一位，不能调整其位置");
+        }
+    }
+
+    /**
+     * 解析枚举选项 JSON 为行列表（[{"label":"显示文本","value":"存储值"},...]）
+     *
+     * @param optionsJson 选项 JSON 字符串
+     * @return 内容为空或解析失败时返回 null，由调用方决定宽容或报错策略
+     */
+    private List<Map<String, String>> parseOptionsOrNull(String optionsJson) {
+        if (optionsJson == null || optionsJson.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            return mapper.readValue(optionsJson,
+                    mapper.getTypeFactory().constructCollectionType(List.class, Map.class));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * 查找选项行列表中指定存储值所在的下标
+     *
+     * @param rows  选项行列表
+     * @param value 存储值（value）
+     * @return 未找到时返回 -1
+     */
+    private int indexOfOptionValue(List<Map<String, String>> rows, String value) {
+        for (int i = 0; i < rows.size(); i++) {
+            if (value.equals(rows.get(i).get("value"))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * 查找选项行列表中指定存储值对应的显示文本
+     *
+     * @param rows  选项行列表
+     * @param value 存储值（value）
+     * @return 未找到时返回 null
+     */
+    private String findOptionLabel(List<Map<String, String>> rows, String value) {
+        int idx = indexOfOptionValue(rows, value);
+        if (idx < 0) {
+            return null;
+        }
+        String label = rows.get(idx).get("label");
+        return label == null ? "" : label;
     }
 
     /**

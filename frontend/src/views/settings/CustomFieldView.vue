@@ -368,12 +368,32 @@ function openEdit(row: any) {
   } else {
     optionRows.value = []
   }
+  // 缺陷"状态"字段：系统预置选项"新建"固定排第一位（展示层兜底规整历史乱序数据）
+  bringNewStatusOptionToFront()
 
   loadDefaultSourceOptions()
   dialogVisible.value = true
 }
 
 // ===== 选项操作 =====
+/**
+ * 缺陷"状态"字段的系统预置选项"新建"（value=NEW，与预置默认值同源）：
+ * 固定排第一位，不可拖动、不可修改显示文本、不可删除（前端锁定 UI，后端兜底校验）
+ */
+function isNewStatusOption(row: OptionRow): boolean {
+  return isDefectStatusField.value && row.value === DEFECT_STATUS_DEFAULT_VALUE
+}
+
+/** 缺陷"状态"字段：系统预置选项"新建"固定排第一位（展示层规整，兜底历史乱序数据） */
+function bringNewStatusOptionToFront() {
+  if (!isDefectStatusField.value) return
+  const idx = optionRows.value.findIndex((r) => r.value === DEFECT_STATUS_DEFAULT_VALUE)
+  if (idx > 0) {
+    const [row] = optionRows.value.splice(idx, 1)
+    optionRows.value.unshift(row)
+  }
+}
+
 // 状态字段新增选项：立即生成编码（时间戳 + 自增序号防重复），行身份在编辑过程中保持稳定
 let statusValueSeq = 0
 function generateStatusValue() {
@@ -573,6 +593,17 @@ function ensureOptionSortable() {
     draggable: '.option-row',
     animation: 150,
     ghostClass: 'cf-drag-ghost',
+    // 缺陷"状态"字段"新建"选项位置不可修改：禁止任何行插入到它之前（该行无拖拽手柄、不可拖动）
+    onMove: (evt) => {
+      const newIdx = optionRows.value.findIndex((r) => isNewStatusOption(r))
+      if (newIdx < 0) return true
+      const siblings = Array.from(evt.to.children)
+      const relatedIdx = evt.related ? siblings.indexOf(evt.related) : -1
+      if (relatedIdx < 0) return true
+      // 拖动行将插入的位置：related 之后则 +1，否则即 related 处
+      const insertIdx = evt.willInsertAfter ? relatedIdx + 1 : relatedIdx
+      return insertIdx > newIdx
+    },
     onEnd: ({ oldIndex, newIndex }) => handleOptionDragEnd(oldIndex, newIndex),
   })
 }
@@ -583,6 +614,13 @@ function handleOptionDragEnd(oldIndex?: number, newIndex?: number) {
   const list = [...optionRows.value]
   const [moved] = list.splice(oldIndex, 1)
   list.splice(newIndex, 0, moved)
+  // 缺陷"状态"字段"新建"选项位置不可修改：兜底校验（拖拽约束已阻止，异常情况下恢复其第一位）
+  const newIdx = list.findIndex((r) => isNewStatusOption(r))
+  if (newIdx > 0) {
+    ElMessage.warning('系统预置选项「新建」固定排第一位，不能调整其位置')
+    const [row] = list.splice(newIdx, 1)
+    list.unshift(row)
+  }
   optionRows.value = list
 }
 
@@ -840,11 +878,32 @@ async function handleDelete(row: any) {
           <el-form-item v-if="isSelectType" label="枚举选项" class="span-2" required>
             <div ref="optionRowsRef" class="option-rows">
               <div v-for="row in optionRows" :key="row.uid" class="option-row">
-                <span class="cf-drag-handle" title="拖动调整顺序">
+                <!-- 缺陷"状态"字段"新建"选项固定排第一位：不提供拖拽手柄，显示锁定标识 -->
+                <span
+                  v-if="isNewStatusOption(row)"
+                  class="cf-drag-locked"
+                  title="系统预置选项，固定排第一位，不可修改、删除"
+                >
+                  <el-icon><Lock /></el-icon>
+                </span>
+                <span v-else class="cf-drag-handle" title="拖动调整顺序">
                   <el-icon><Rank /></el-icon>
                 </span>
-                <el-input v-model="row.label" placeholder="显示文本" style="flex: 1" />
-                <el-button link type="danger" @click="removeOptionRow(row)">删除</el-button>
+                <!-- 缺陷"状态"字段"新建"选项不可修改、删除（输入框置灰，删除入口隐藏；后端同样校验） -->
+                <el-input
+                  v-model="row.label"
+                  placeholder="显示文本"
+                  style="flex: 1"
+                  :disabled="isNewStatusOption(row)"
+                />
+                <el-button
+                  v-if="!isNewStatusOption(row)"
+                  link
+                  type="danger"
+                  @click="removeOptionRow(row)"
+                >
+                  删除
+                </el-button>
               </div>
             </div>
             <el-button type="primary" link @click="addOptionRow">+ 添加选项</el-button>

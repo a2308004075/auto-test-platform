@@ -29,7 +29,6 @@ import DynamicFieldGrid from '@/components/DynamicFieldGrid/index.vue'
 import CommentPanel from '@/components/CommentPanel/index.vue'
 import { getCustomFieldsForRender } from '@/api/customField'
 import { getContentTemplates } from '@/api/contentTemplate'
-import { useDict } from '@/composables/useDict'
 import { useDefectStatusOptions } from '@/composables/useDefectStatus'
 import { isScopeVisible } from '@/utils/customFieldScope'
 import { applyFieldDefaults } from '@/utils/customFieldDefault'
@@ -42,21 +41,11 @@ const projectId = computed(() => Number(route.params.id))
 const defectId = computed(() => Number(route.params.defectId))
 /** 新建模式：/defects/new 路由不带 defectId 参数 */
 const isCreate = computed(() => !route.params.defectId)
-const { options: relationTypeOptions } = useDict('defect_relation_type')
-const { options: targetTypeOptions } = useDict('defect_target_type')
 // 状态选项优先读【页面配置-缺陷字段】的"状态"字段配置（按项目），无配置回退字典
 const { options: statusOptions } = useDefectStatusOptions(() => projectId.value)
 
-const relationTypeLabelMap = computed(() => {
-  const map: Record<string, string> = {}
-  relationTypeOptions.value.forEach((o) => { map[o.value] = o.label })
-  return map
-})
-const targetTypeLabelMap = computed(() => {
-  const map: Record<string, string> = {}
-  targetTypeOptions.value.forEach((o) => { map[o.value] = o.label })
-  return map
-})
+/** 关联目标类型 → 中文名（表格「目标类型」列展示） */
+const targetTypeLabelMap: Record<string, string> = { AUTO_CASE: '自动化用例', MANUAL_CASE: '手动用例' }
 
 const loading = ref(false)
 const detail = ref<any>({})
@@ -87,13 +76,16 @@ const visibleEditFields = computed(() =>
   editFields.value.filter((f: any) => isScopeVisible(f.displayScope, isCreate.value ? 'create' : 'detail'))
 )
 
-// 关联（新建模式本页暂存随创建提交；详情模式实时增删）
-const relationForm = reactive({ relationType: 'RELATED', targetType: 'AUTO_CASE', targetId: undefined as number | undefined, targetTitle: '' })
+// 关联（参考手动用例"关联"：目标类型=自动化/手动用例，走选择器单选，无关联类型固定 RELATED；
+// 新建模式本页暂存随创建提交；详情模式实时增删）
+const RELATION_TARGET_TYPES = [
+  { value: 'AUTO_CASE', label: '自动化用例' },
+  { value: 'MANUAL_CASE', label: '手动用例' },
+]
+const relationForm = reactive({ targetType: 'AUTO_CASE', targetId: undefined as number | undefined, targetTitle: '' })
 const relationVisible = ref(false)
 // 新建模式待提交关联列表
 const draftRelations = ref<any[]>([])
-// 用例类目标（手动/自动化用例）支持搜索选择，其余类型手动输入
-const isCaseTarget = computed(() => ['MANUAL_CASE', 'AUTO_CASE'].includes(relationForm.targetType))
 const caseSelectVisible = ref(false)
 
 function handleTargetTypeChange() {
@@ -477,30 +469,34 @@ async function handleTransition(targetStatus: string) {
 // 关联
 async function handleAddRelation() {
   if (!relationForm.targetId) {
-    ElMessage.warning(isCaseTarget.value ? '请选择关联的用例' : '请输入关联目标 ID')
+    ElMessage.warning('请选择关联的用例')
     return
   }
-  // 新建模式：暂存到待提交列表（用例类目标本地防重复，与后端校验一致）
+  // 新建模式：暂存到待提交列表（本地防重复，与后端唯一约束一致）
   if (isCreate.value) {
-    if (isCaseTarget.value && draftRelations.value.some((r) => r.targetType === relationForm.targetType && r.targetId === relationForm.targetId)) {
+    if (draftRelations.value.some((r) => r.targetType === relationForm.targetType && r.targetId === relationForm.targetId)) {
       ElMessage.warning('该用例已添加，请勿重复添加')
       return
     }
     draftRelations.value.push({
-      relationType: relationForm.relationType,
       targetType: relationForm.targetType,
       targetId: relationForm.targetId,
       targetTitle: relationForm.targetTitle,
     })
     relationVisible.value = false
-    Object.assign(relationForm, { relationType: 'RELATED', targetType: 'AUTO_CASE', targetId: undefined, targetTitle: '' })
+    Object.assign(relationForm, { targetType: 'AUTO_CASE', targetId: undefined, targetTitle: '' })
     return
   }
   try {
-    await addDefectRelation(projectId.value, defectId.value, relationForm)
+    // 关联类型固定 RELATED（后端对空 relationType 默认 RELATED，无需显式传）
+    await addDefectRelation(projectId.value, defectId.value, {
+      targetType: relationForm.targetType,
+      targetId: relationForm.targetId,
+      targetTitle: relationForm.targetTitle,
+    })
     ElMessage.success('添加成功')
     relationVisible.value = false
-    Object.assign(relationForm, { relationType: 'RELATED', targetType: 'AUTO_CASE', targetId: undefined, targetTitle: '' })
+    Object.assign(relationForm, { targetType: 'AUTO_CASE', targetId: undefined, targetTitle: '' })
     fetchDetail()
   } catch (e: any) { ElMessage.error(e?.response?.data?.message || '添加失败') }
 }
@@ -723,14 +719,11 @@ onMounted(() => {
               <el-button type="primary" size="small" @click="relationVisible = true">添加关联</el-button>
             </div>
             <el-table :data="relationList" border stripe>
-              <el-table-column label="关联类型" width="120">
-                <template #default="{ row }">{{ relationTypeLabelMap[row.relationType] || row.relationType }}</template>
-              </el-table-column>
-              <el-table-column label="目标类型" width="140">
+              <el-table-column label="目标类型" width="120">
                 <template #default="{ row }">{{ targetTypeLabelMap[row.targetType] || row.targetType }}</template>
               </el-table-column>
               <el-table-column prop="targetId" label="目标 ID" width="100" />
-              <el-table-column prop="targetTitle" label="目标标题" />
+              <el-table-column prop="targetTitle" label="目标标题" min-width="200" show-overflow-tooltip />
               <el-table-column label="操作" width="80">
                 <template #default="{ row, $index }">
                   <el-button type="danger" link size="small" @click="handleDeleteRelation(row, $index)">删除</el-button>
@@ -769,35 +762,20 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 添加关联弹窗 -->
+    <!-- 添加关联弹窗（参考手动用例"添加关联"：目标类型=自动化/手动用例，选择器单选） -->
     <el-dialog v-model="relationVisible" title="添加关联" width="460px">
       <el-form label-position="top">
-        <el-form-item label="关联类型">
-          <el-select v-model="relationForm.relationType" style="width: 100%">
-            <el-option v-for="r in relationTypeOptions" :key="r.value" :value="r.value" :label="r.label" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="目标类型">
+        <el-form-item label="目标类型" required>
           <el-select v-model="relationForm.targetType" style="width: 100%" @change="handleTargetTypeChange">
-            <el-option v-for="t in targetTypeOptions" :key="t.value" :value="t.value" :label="t.label" />
+            <el-option v-for="t in RELATION_TARGET_TYPES" :key="t.value" :value="t.value" :label="t.label" />
           </el-select>
         </el-form-item>
-        <!-- 用例类目标：搜索选择，自动带出 ID/标题 -->
-        <el-form-item v-if="isCaseTarget" label="关联目标" required>
+        <el-form-item label="关联目标" required>
           <div style="display: flex; gap: 8px; width: 100%">
             <el-input :model-value="relationForm.targetTitle" placeholder="点击右侧按钮选择用例" readonly style="flex: 1" />
             <el-button type="primary" @click="caseSelectVisible = true">选择用例</el-button>
           </div>
         </el-form-item>
-        <!-- 其余目标类型：保持手动输入 -->
-        <template v-else>
-          <el-form-item label="目标 ID" required>
-            <el-input-number v-model="relationForm.targetId" :controls="false" style="width: 100%" />
-          </el-form-item>
-          <el-form-item label="目标标题">
-            <el-input v-model="relationForm.targetTitle" placeholder="关联目标标题快照" />
-          </el-form-item>
-        </template>
       </el-form>
       <template #footer>
         <el-button @click="relationVisible = false">取消</el-button>
@@ -805,8 +783,8 @@ onMounted(() => {
       </template>
     </el-dialog>
 
-    <!-- 用例选择弹窗（单选） -->
-    <CaseSelectDialog v-model:visible="caseSelectVisible" :project-id="projectId" @confirm="handleCaseConfirm" />
+    <!-- 用例选择弹窗（单选：锁定 Tab 与所选目标类型一致，点击行即确认） -->
+    <CaseSelectDialog v-model:visible="caseSelectVisible" :project-id="projectId" :fixed-tab="relationForm.targetType" @confirm="handleCaseConfirm" />
 
     <!-- 添加附件弹窗 -->
     <el-dialog v-model="attachmentVisible" title="添加附件" width="460px">
