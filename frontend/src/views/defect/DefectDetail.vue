@@ -25,6 +25,7 @@ import {
 } from '@/api/defect'
 import PageHeader from '@/components/PageHeader/index.vue'
 import CaseSelectDialog from '@/components/CaseSelectDialog/index.vue'
+import RequirementItemSelectDialog from '@/components/RequirementItemSelectDialog/index.vue'
 import DynamicFieldGrid from '@/components/DynamicFieldGrid/index.vue'
 import CommentPanel from '@/components/CommentPanel/index.vue'
 import { getCustomFieldsForRender } from '@/api/customField'
@@ -45,7 +46,7 @@ const isCreate = computed(() => !route.params.defectId)
 const { options: statusOptions } = useDefectStatusOptions(() => projectId.value)
 
 /** 关联目标类型 → 中文名（表格「目标类型」列展示） */
-const targetTypeLabelMap: Record<string, string> = { AUTO_CASE: '自动化用例', MANUAL_CASE: '手动用例' }
+const targetTypeLabelMap: Record<string, string> = { AUTO_CASE: '自动化用例', MANUAL_CASE: '手动用例', REQUIREMENT: '需求' }
 
 const loading = ref(false)
 const detail = ref<any>({})
@@ -76,27 +77,37 @@ const visibleEditFields = computed(() =>
   editFields.value.filter((f: any) => isScopeVisible(f.displayScope, isCreate.value ? 'create' : 'detail'))
 )
 
-// 关联（参考手动用例"关联"：目标类型=自动化/手动用例，走选择器单选，无关联类型固定 RELATED；
+// 关联（参考手动用例"关联"：目标类型=需求/自动化用例/手动用例，走选择器单选，无关联类型固定 RELATED；
 // 新建模式本页暂存随创建提交；详情模式实时增删）
 const RELATION_TARGET_TYPES = [
   { value: 'AUTO_CASE', label: '自动化用例' },
   { value: 'MANUAL_CASE', label: '手动用例' },
+  { value: 'REQUIREMENT', label: '需求' },
 ]
 const relationForm = reactive({ targetType: 'AUTO_CASE', targetId: undefined as number | undefined, targetTitle: '' })
 const relationVisible = ref(false)
 // 新建模式待提交关联列表
 const draftRelations = ref<any[]>([])
 const caseSelectVisible = ref(false)
+const requirementSelectVisible = ref(false)
 
 function handleTargetTypeChange() {
   relationForm.targetId = undefined
   relationForm.targetTitle = ''
 }
 
-function handleCaseConfirm(rows: Array<{ id: number; title: string }>) {
-  if (rows.length === 0) return
-  relationForm.targetId = rows[0].id
-  relationForm.targetTitle = rows[0].title
+/** 打开目标选择器（按当前目标类型：需求走需求条目弹窗，用例类走用例弹窗） */
+function openTargetSelector() {
+  if (relationForm.targetType === 'REQUIREMENT') requirementSelectVisible.value = true
+  else caseSelectVisible.value = true
+}
+
+/** 关联目标选择确认（单选，点击行即确认）：回填目标 ID/标题（需求/用例弹窗 confirm 均含 id 与 title） */
+function handleRelationTargetConfirm(rows: Array<{ id: number; title: string }>) {
+  const row = rows[0]
+  if (!row) return
+  relationForm.targetId = row.id
+  relationForm.targetTitle = row.title
 }
 
 // 附件（新建模式本页暂存随创建提交；详情模式实时增删）
@@ -469,13 +480,13 @@ async function handleTransition(targetStatus: string) {
 // 关联
 async function handleAddRelation() {
   if (!relationForm.targetId) {
-    ElMessage.warning('请选择关联的用例')
+    ElMessage.warning('请选择关联目标')
     return
   }
   // 新建模式：暂存到待提交列表（本地防重复，与后端唯一约束一致）
   if (isCreate.value) {
     if (draftRelations.value.some((r) => r.targetType === relationForm.targetType && r.targetId === relationForm.targetId)) {
-      ElMessage.warning('该用例已添加，请勿重复添加')
+      ElMessage.warning('该目标已添加，请勿重复添加')
       return
     }
     draftRelations.value.push({
@@ -762,7 +773,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 添加关联弹窗（参考手动用例"添加关联"：目标类型=自动化/手动用例，选择器单选） -->
+    <!-- 添加关联弹窗（参考手动用例"添加关联"：目标类型=需求/自动化用例/手动用例，选择器单选） -->
     <el-dialog v-model="relationVisible" title="添加关联" width="460px">
       <el-form label-position="top">
         <el-form-item label="目标类型" required>
@@ -772,8 +783,8 @@ onMounted(() => {
         </el-form-item>
         <el-form-item label="关联目标" required>
           <div style="display: flex; gap: 8px; width: 100%">
-            <el-input :model-value="relationForm.targetTitle" placeholder="点击右侧按钮选择用例" readonly style="flex: 1" />
-            <el-button type="primary" @click="caseSelectVisible = true">选择用例</el-button>
+            <el-input :model-value="relationForm.targetTitle" placeholder="点击右侧按钮选择目标" readonly style="flex: 1" />
+            <el-button type="primary" @click="openTargetSelector">选择{{ relationForm.targetType === 'REQUIREMENT' ? '需求' : '用例' }}</el-button>
           </div>
         </el-form-item>
       </el-form>
@@ -784,7 +795,14 @@ onMounted(() => {
     </el-dialog>
 
     <!-- 用例选择弹窗（单选：锁定 Tab 与所选目标类型一致，点击行即确认） -->
-    <CaseSelectDialog v-model:visible="caseSelectVisible" :project-id="projectId" :fixed-tab="relationForm.targetType" @confirm="handleCaseConfirm" />
+    <CaseSelectDialog v-model:visible="caseSelectVisible" :project-id="projectId" :fixed-tab="relationForm.targetType" @confirm="handleRelationTargetConfirm" />
+
+    <!-- 需求条目选择弹窗（单选：点击行即确认） -->
+    <RequirementItemSelectDialog
+      v-model:visible="requirementSelectVisible"
+      :project-id="projectId"
+      @confirm="handleRelationTargetConfirm"
+    />
 
     <!-- 添加附件弹窗 -->
     <el-dialog v-model="attachmentVisible" title="添加附件" width="460px">

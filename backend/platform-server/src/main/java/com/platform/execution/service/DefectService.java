@@ -20,6 +20,10 @@ import com.platform.execution.dto.*;
 import com.platform.execution.entity.*;
 import com.platform.execution.mapper.*;
 import com.platform.project.service.ProjectService;
+import com.platform.requirement.entity.RequirementItem;
+import com.platform.requirement.entity.RequirementVersion;
+import com.platform.requirement.mapper.RequirementItemMapper;
+import com.platform.requirement.mapper.RequirementVersionMapper;
 import com.platform.sys.entity.CustomField;
 import com.platform.sys.mapper.CustomFieldMapper;
 import com.platform.sys.service.CustomFieldService;
@@ -61,6 +65,8 @@ public class DefectService {
     private final CustomFieldValueService customFieldValueService;
     private final CommentService commentService;
     private final CustomFieldMapper customFieldMapper;
+    private final RequirementItemMapper requirementItemMapper;
+    private final RequirementVersionMapper requirementVersionMapper;
 
     /** 内置状态集合（回退用）：项目未在【页面配置-编辑缺陷】配置"状态"字段时的合法状态 */
     private static final Set<String> VALID_STATUSES = new HashSet<>(Arrays.asList(
@@ -582,7 +588,7 @@ public class DefectService {
         Defect defect = findById(defectId);
         String targetType = request.getTargetType();
 
-        // 用例类目标：校验存在性、同项目，并回填标题快照
+        // 用例类/需求条目目标：校验存在性、同项目，并回填标题快照
         String targetTitle = request.getTargetTitle();
         if ("MANUAL_CASE".equals(targetType) || "AUTO_CASE".equals(targetType)) {
             if ("MANUAL_CASE".equals(targetType)) {
@@ -613,6 +619,26 @@ public class DefectService {
                     .eq(DefectRelation::getTargetId, request.getTargetId());
             if (defectRelationMapper.selectCount(dupWrapper) > 0) {
                 throw new BusinessException(ErrorCode.RESOURCE_CONFLICT, "该用例已关联到当前缺陷");
+            }
+        } else if ("REQUIREMENT".equals(targetType)) {
+            // 需求条目目标：校验条目存在、与缺陷同项目（条目 → 版本 → 项目），回填标题快照
+            RequirementItem item = requirementItemMapper.selectById(request.getTargetId());
+            if (item == null) {
+                throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "需求条目不存在：" + request.getTargetId());
+            }
+            RequirementVersion version = requirementVersionMapper.selectById(item.getVersionId());
+            if (version == null || !Objects.equals(version.getProjectId(), defect.getProjectId())) {
+                throw new BusinessException(ErrorCode.PARAM_VALIDATION_ERROR, "需求条目与缺陷不属于同一项目");
+            }
+            targetTitle = item.getTitle();
+
+            // 防重复
+            LambdaQueryWrapper<DefectRelation> dupWrapper = new LambdaQueryWrapper<>();
+            dupWrapper.eq(DefectRelation::getDefectId, defectId)
+                    .eq(DefectRelation::getTargetType, targetType)
+                    .eq(DefectRelation::getTargetId, request.getTargetId());
+            if (defectRelationMapper.selectCount(dupWrapper) > 0) {
+                throw new BusinessException(ErrorCode.RESOURCE_CONFLICT, "该需求条目已关联到当前缺陷");
             }
         }
 
